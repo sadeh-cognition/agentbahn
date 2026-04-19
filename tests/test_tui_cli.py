@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 
 from django.core.management import call_command
 
 from agentbahn.projects.schemas import TaskResponse
 from agentbahn_tui import cli
+from agentbahn_tui.tui import AgentbahnTui
+from agentbahn_tui.tui import CommandHistory
 from agentbahn_tui.tui import CommandResult
 from agentbahn_tui.tui import format_tasks_output
 from agentbahn_tui.tui import get_placeholder_message
@@ -118,3 +121,44 @@ def test_format_tasks_output_handles_empty_results() -> None:
     assert format_tasks_output([]) == CommandResult(
         kind="message", message="No tasks found."
     )
+
+
+def test_command_history_navigates_backwards_and_restores_draft() -> None:
+    history = CommandHistory(commands=[])
+
+    history.record("/project list")
+    history.record("/task list 7")
+
+    assert history.previous("") == "/task list 7"
+    assert history.previous("") == "/project list"
+    assert history.next() == "/task list 7"
+    assert history.next() == ""
+    assert history.next() is None
+
+
+def test_tui_command_history_uses_up_and_down_keys() -> None:
+    async def run_test() -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "p", "r", "o", "j", "e", "c", "t", " ", "l", "i", "s", "t")
+            await pilot.press("enter")
+            await pilot.press("/", "t", "a", "s", "k", " ", "l", "i", "s", "t", " ", "7")
+            await pilot.press("enter")
+            await pilot.press("up")
+            assert app.query_one("#command-input").value == "/task list 7"
+            await pilot.press("up")
+            assert app.query_one("#command-input").value == "/project list"
+            await pilot.press("down")
+            assert app.query_one("#command-input").value == "/task list 7"
+            await pilot.press("ctrl+u")
+            await pilot.press("/", "d", "r", "a", "f", "t")
+            await pilot.press("up")
+            assert app.query_one("#command-input").value == "/task list 7"
+            await pilot.press("down")
+            assert app.query_one("#command-input").value == "/draft"
+
+    asyncio.run(run_test())

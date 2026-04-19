@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from textual.binding import Binding
 from textual.app import App
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -22,6 +23,46 @@ from agentbahn_tui.tasks import fetch_tasks
 
 def get_placeholder_message() -> str:
     return "Enter /project list or /task list PROJECT_ID to fetch data from projectbahn."
+
+
+@dataclass
+class CommandHistory:
+    commands: list[str]
+    draft: str = ""
+    index: int | None = None
+
+    def record(self, command: str) -> None:
+        normalized_command = command.strip()
+        if not normalized_command:
+            self.reset_navigation()
+            return
+        self.commands.append(normalized_command)
+        self.reset_navigation()
+
+    def previous(self, current_value: str) -> str | None:
+        if not self.commands:
+            return None
+        if self.index is None:
+            self.draft = current_value
+            self.index = len(self.commands) - 1
+        elif self.index > 0:
+            self.index -= 1
+        return self.commands[self.index]
+
+    def next(self) -> str | None:
+        if self.index is None:
+            return None
+        next_index = self.index + 1
+        if next_index >= len(self.commands):
+            draft = self.draft
+            self.reset_navigation()
+            return draft
+        self.index = next_index
+        return self.commands[self.index]
+
+    def reset_navigation(self) -> None:
+        self.draft = ""
+        self.index = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +111,24 @@ def run_tui_command(
     return format_tasks_output(fetch_tasks_command(project_id))
 
 
+class CommandInput(Input):
+    BINDINGS = [
+        *Input.BINDINGS,
+        Binding("up", "history_previous", "Previous command", show=False),
+        Binding("down", "history_next", "Next command", show=False),
+    ]
+
+    def action_history_previous(self) -> None:
+        app = self.app
+        if isinstance(app, AgentbahnTui):
+            app.show_previous_command()
+
+    def action_history_next(self) -> None:
+        app = self.app
+        if isinstance(app, AgentbahnTui):
+            app.show_next_command()
+
+
 class AgentbahnTui(App[None]):
     """Textual app with a simple slash-command interface."""
 
@@ -107,6 +166,8 @@ class AgentbahnTui(App[None]):
         super().__init__()
         self._fetch_projects_command = fetch_projects_command
         self._fetch_tasks_command = fetch_tasks_command
+        self._command_history = CommandHistory(commands=[])
+        self._suppressed_history_change_events = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -114,11 +175,12 @@ class AgentbahnTui(App[None]):
             with VerticalScroll(id="results-pane"):
                 yield Static(get_placeholder_message(), id="message-output")
                 yield DataTable(id="results-table")
-            yield Input(placeholder="/project list", id="command-input")
+            yield CommandInput(placeholder="/project list", id="command-input")
         yield Footer()
 
     def on_mount(self) -> None:
         self._show_message(get_placeholder_message())
+        self.query_one("#command-input", Input).focus()
 
     def _show_message(self, message: str) -> None:
         message_output = self.query_one("#message-output", Static)
@@ -154,7 +216,35 @@ class AgentbahnTui(App[None]):
                 task.user_username,
             )
 
+    def _replace_command_input_value(self, value: str) -> None:
+        command_input = self.query_one("#command-input", Input)
+        self._suppressed_history_change_events += 1
+        command_input.value = value
+        command_input.cursor_position = len(value)
+
+    def show_previous_command(self) -> None:
+        command_input = self.query_one("#command-input", Input)
+        previous_command = self._command_history.previous(command_input.value)
+        if previous_command is not None:
+            self._replace_command_input_value(previous_command)
+
+    def show_next_command(self) -> None:
+        next_command = self._command_history.next()
+        if next_command is not None:
+            self._replace_command_input_value(next_command)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "command-input":
+            return
+        if self._suppressed_history_change_events > 0:
+            self._suppressed_history_change_events -= 1
+            return
+        if self._command_history.index is not None:
+            self._command_history.draft = event.value
+            self._command_history.index = None
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._command_history.record(event.value)
         result = run_tui_command(
             event.value,
             self._fetch_projects_command,
@@ -167,6 +257,7 @@ class AgentbahnTui(App[None]):
         else:
             self._show_message(result.message or get_placeholder_message())
         event.input.value = ""
+        event.input.focus()
 
 
 def run_tui() -> None:
