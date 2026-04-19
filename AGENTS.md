@@ -16,6 +16,7 @@ When interacting with the backend, always use the HTTP API.
 Always use the HTTP API for fetching, updating, or deleting data.
 When writing Django code, try your hardest not to use Django signals.
 `projectbahn` refers to another project whose backend server is already running. See PROJECTBAHN API_BASE_URL to find where this backend server is running.
+`agentbahn` refers to this project whose backend is running already. See API_BASE_URL in settings.py to find where this backend server is running.
 
 ## llm-interactions.md
 

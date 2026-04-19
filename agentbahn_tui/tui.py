@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -15,14 +16,19 @@ from textual.widgets import Header
 from textual.widgets import Input
 from textual.widgets import Static
 
+from agentbahn.projects.schemas import EventLogListResponse
 from agentbahn.projects.schemas import ProjectListResponse
 from agentbahn.projects.schemas import TaskListResponse
+from agentbahn_tui.project_events import fetch_project_events
 from agentbahn_tui.projects import fetch_projects
 from agentbahn_tui.tasks import fetch_tasks
 
 
 def get_placeholder_message() -> str:
-    return "Enter /project list or /task list PROJECT_ID to fetch data from projectbahn."
+    return (
+        "Enter /project list, /project event list PROJECT_ID, or /task list PROJECT_ID "
+        "to fetch data from projectbahn."
+    )
 
 
 @dataclass
@@ -67,10 +73,11 @@ class CommandHistory:
 
 @dataclass(frozen=True)
 class CommandResult:
-    kind: Literal["message", "projects", "tasks"]
+    kind: Literal["message", "projects", "tasks", "events"]
     message: str | None = None
     projects: ProjectListResponse | None = None
     tasks: TaskListResponse | None = None
+    events: EventLogListResponse | None = None
 
 
 def message_result(message: str) -> CommandResult:
@@ -89,16 +96,37 @@ def format_tasks_output(tasks: TaskListResponse) -> CommandResult:
     return CommandResult(kind="tasks", tasks=tasks)
 
 
+def format_event_details(event_details: dict[str, object]) -> str:
+    return json.dumps(event_details, sort_keys=True)
+
+
+def format_project_events_output(events: EventLogListResponse) -> CommandResult:
+    if not events:
+        return message_result("No events found.")
+    return CommandResult(kind="events", events=events)
+
+
 def run_tui_command(
     command: str,
     fetch_projects_command: Callable[[], ProjectListResponse],
     fetch_tasks_command: Callable[[int], TaskListResponse],
+    fetch_project_events_command: Callable[[int], EventLogListResponse],
 ) -> CommandResult:
     normalized_command = command.strip()
     if normalized_command == "/project list":
         return format_projects_output(fetch_projects_command())
 
     command_parts = normalized_command.split()
+    if command_parts[:3] == ["/project", "event", "list"]:
+        if len(command_parts) != 4:
+            return message_result("Usage: /project event list PROJECT_ID")
+
+        try:
+            project_id = int(command_parts[3])
+        except ValueError:
+            return message_result("PROJECT_ID must be an integer.")
+        return format_project_events_output(fetch_project_events_command(project_id))
+
     if command_parts[:2] != ["/task", "list"]:
         return message_result(f"Unknown command: {normalized_command or '<empty>'}")
     if len(command_parts) != 3:
@@ -162,10 +190,12 @@ class AgentbahnTui(App[None]):
         *,
         fetch_projects_command: Callable[[], ProjectListResponse] = fetch_projects,
         fetch_tasks_command: Callable[[int], TaskListResponse] = fetch_tasks,
+        fetch_project_events_command: Callable[[int], EventLogListResponse] = fetch_project_events,
     ) -> None:
         super().__init__()
         self._fetch_projects_command = fetch_projects_command
         self._fetch_tasks_command = fetch_tasks_command
+        self._fetch_project_events_command = fetch_project_events_command
         self._command_history = CommandHistory(commands=[])
         self._suppressed_history_change_events = 0
 
@@ -216,6 +246,22 @@ class AgentbahnTui(App[None]):
                 task.user_username,
             )
 
+    def _show_events(self, events: EventLogListResponse) -> None:
+        message_output = self.query_one("#message-output", Static)
+        results_table = self.query_one("#results-table", DataTable)
+        message_output.display = False
+        results_table.display = True
+        results_table.clear(columns=True)
+        results_table.add_columns("ID", "Entity", "Entity ID", "Event Type", "Details")
+        for event in events:
+            results_table.add_row(
+                str(event.id),
+                event.entity_type,
+                str(event.entity_id),
+                event.event_type,
+                format_event_details(event.event_details),
+            )
+
     def _replace_command_input_value(self, value: str) -> None:
         command_input = self.query_one("#command-input", Input)
         self._suppressed_history_change_events += 1
@@ -249,11 +295,14 @@ class AgentbahnTui(App[None]):
             event.value,
             self._fetch_projects_command,
             self._fetch_tasks_command,
+            self._fetch_project_events_command,
         )
         if result.kind == "projects" and result.projects is not None:
             self._show_projects(result.projects)
         elif result.kind == "tasks" and result.tasks is not None:
             self._show_tasks(result.tasks)
+        elif result.kind == "events" and result.events is not None:
+            self._show_events(result.events)
         else:
             self._show_message(result.message or get_placeholder_message())
         event.input.value = ""

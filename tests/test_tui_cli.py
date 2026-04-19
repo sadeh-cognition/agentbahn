@@ -3,13 +3,17 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 
+from agentbahn.projects.schemas import EventLogResponse
+from agentbahn.projects.schemas import FeatureResponse
 from django.core.management import call_command
 
+from agentbahn_tui.project_events import fetch_project_events
 from agentbahn.projects.schemas import TaskResponse
 from agentbahn_tui import cli
 from agentbahn_tui.tui import AgentbahnTui
 from agentbahn_tui.tui import CommandHistory
 from agentbahn_tui.tui import CommandResult
+from agentbahn_tui.tui import format_event_details
 from agentbahn_tui.tui import format_tasks_output
 from agentbahn_tui.tui import get_placeholder_message
 from agentbahn_tui.tui import run_tui_command
@@ -18,7 +22,8 @@ from agentbahn_tui.tui import run_tui_command
 def test_placeholder_message_is_stable() -> None:
     assert (
         get_placeholder_message()
-        == "Enter /project list or /task list PROJECT_ID to fetch data from projectbahn."
+        == "Enter /project list, /project event list PROJECT_ID, or /task list PROJECT_ID "
+        "to fetch data from projectbahn."
     )
 
 
@@ -75,6 +80,7 @@ def test_run_tui_command_lists_tasks_for_project() -> None:
                 date_updated="2026-04-19T10:30:00Z",
             )
         ],
+        fetch_project_events_command=lambda _project_id: [],
     )
 
     assert output == CommandResult(
@@ -104,6 +110,7 @@ def test_run_tui_command_validates_task_list_arguments() -> None:
             "/task list",
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
         )
         == CommandResult(kind="message", message="Usage: /task list PROJECT_ID")
     )
@@ -112,6 +119,58 @@ def test_run_tui_command_validates_task_list_arguments() -> None:
             "/task list abc",
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+        )
+        == CommandResult(kind="message", message="PROJECT_ID must be an integer.")
+    )
+
+
+def test_run_tui_command_lists_project_events() -> None:
+    output = run_tui_command(
+        "/project event list 7",
+        fetch_projects_command=lambda: [],
+        fetch_tasks_command=lambda _project_id: [],
+        fetch_project_events_command=lambda project_id: [
+            EventLogResponse(
+                id=21,
+                entity_type="task",
+                entity_id=13,
+                event_type="task.updated",
+                event_details={"project_id": project_id, "status": "done"},
+            )
+        ],
+    )
+
+    assert output == CommandResult(
+        kind="events",
+        events=[
+            EventLogResponse(
+                id=21,
+                entity_type="task",
+                entity_id=13,
+                event_type="task.updated",
+                event_details={"project_id": 7, "status": "done"},
+            )
+        ],
+    )
+
+
+def test_run_tui_command_validates_project_event_arguments() -> None:
+    assert (
+        run_tui_command(
+            "/project event list",
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+        )
+        == CommandResult(kind="message", message="Usage: /project event list PROJECT_ID")
+    )
+    assert (
+        run_tui_command(
+            "/project event list abc",
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
         )
         == CommandResult(kind="message", message="PROJECT_ID must be an integer.")
     )
@@ -121,6 +180,58 @@ def test_format_tasks_output_handles_empty_results() -> None:
     assert format_tasks_output([]) == CommandResult(
         kind="message", message="No tasks found."
     )
+
+
+def test_fetch_project_events_includes_project_feature_and_task_events() -> None:
+    events = fetch_project_events(
+        7,
+        fetch_features_command=lambda project_id: [
+            FeatureResponse(
+                id=3,
+                project_id=project_id or 0,
+                parent_feature_id=None,
+                name="CLI",
+                description="Command interface",
+                date_created="2026-04-19T10:00:00Z",
+                date_updated="2026-04-19T10:30:00Z",
+            )
+        ],
+        fetch_tasks_command=lambda project_id: [
+            TaskResponse(
+                id=11,
+                project_id=project_id,
+                project_name="Roadmap",
+                feature_id=3,
+                feature_name="CLI",
+                user_id=5,
+                user_username="alice",
+                title="List events",
+                description="Show project events",
+                status="todo",
+                date_created="2026-04-19T10:00:00Z",
+                date_updated="2026-04-19T10:30:00Z",
+            )
+        ],
+        fetch_event_logs_command=lambda entity_type, entity_id: [
+            EventLogResponse(
+                id=entity_id + 100,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                event_type=f"{entity_type}.updated",
+                event_details={"entity_id": entity_id},
+            )
+        ],
+    )
+
+    assert [(event.id, event.entity_type, event.entity_id) for event in events] == [
+        (111, "task", 11),
+        (107, "project", 7),
+        (103, "feature", 3),
+    ]
+
+
+def test_format_event_details_sorts_keys_for_stable_display() -> None:
+    assert format_event_details({"b": 2, "a": 1}) == '{"a": 1, "b": 2}'
 
 
 def test_command_history_navigates_backwards_and_restores_draft() -> None:
@@ -141,6 +252,7 @@ def test_tui_command_history_uses_up_and_down_keys() -> None:
         app = AgentbahnTui(
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
         )
 
         async with app.run_test() as pilot:
