@@ -2,21 +2,29 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentbahn.codex_openai_client import CodexCredentials
 from agentbahn.codex_openai_client import CodexOpenAIClient
 
-try:
-    from dspy import BaseLM as DSPyBaseLM
-except ModuleNotFoundError as exc:
-    _DSPY_IMPORT_ERROR = exc
+if TYPE_CHECKING:
 
-    class DSPyBaseLM:  # type: ignore[no-redef]
-        def __init__(self, *_: Any, **__: Any) -> None:
-            raise ModuleNotFoundError(
-                "CodexDSPyLM requires the 'dspy' package. Install project dependencies with uv."
-            ) from _DSPY_IMPORT_ERROR
+    class DSPyBaseLM:
+        kwargs: dict[str, Any]
+        model: str
+
+        def __init__(self, *_: Any, **__: Any) -> None: ...
+else:
+    try:
+        from dspy import BaseLM as DSPyBaseLM
+    except ModuleNotFoundError as exc:
+        _DSPY_IMPORT_ERROR = exc
+
+        class DSPyBaseLM:  # type: ignore[no-redef]
+            def __init__(self, *_: Any, **__: Any) -> None:
+                raise ModuleNotFoundError(
+                    "CodexDSPyLM requires the 'dspy' package. Install project dependencies with uv."
+                ) from _DSPY_IMPORT_ERROR
 
 
 class _AttrObject(Mapping[str, Any]):
@@ -33,10 +41,7 @@ class _AttrObject(Mapping[str, Any]):
         return len(self.__dict__)
 
     def model_dump(self) -> dict[str, Any]:
-        return {
-            key: _to_plain_value(value)
-            for key, value in self.__dict__.items()
-        }
+        return {key: _to_plain_value(value) for key, value in self.__dict__.items()}
 
 
 def _to_plain_value(value: Any) -> Any:
@@ -51,7 +56,9 @@ def _to_plain_value(value: Any) -> Any:
 
 def _to_attr_object(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return _AttrObject(**{key: _to_attr_object(item) for key, item in value.items()})
+        return _AttrObject(
+            **{key: _to_attr_object(item) for key, item in value.items()}
+        )
     if isinstance(value, list):
         return [_to_attr_object(item) for item in value]
     return value
@@ -60,7 +67,9 @@ def _to_attr_object(value: Any) -> Any:
 def _normalize_message_content(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "input_text", "text": content}]
-    if isinstance(content, Iterable) and not isinstance(content, (str, bytes, bytearray)):
+    if isinstance(content, Iterable) and not isinstance(
+        content, (str, bytes, bytearray)
+    ):
         normalized: list[dict[str, Any]] = []
         for item in content:
             if not isinstance(item, Mapping):
@@ -68,12 +77,16 @@ def _normalize_message_content(content: Any) -> list[dict[str, Any]]:
             item_dict = dict(item)
             item_type = item_dict.get("type")
             if item_type == "text":
-                normalized.append({"type": "input_text", "text": item_dict.get("text", "")})
+                normalized.append(
+                    {"type": "input_text", "text": item_dict.get("text", "")}
+                )
                 continue
             if item_type == "image_url":
                 image_url = item_dict.get("image_url")
                 if isinstance(image_url, Mapping):
-                    normalized.append({"type": "input_image", "image_url": image_url.get("url", "")})
+                    normalized.append(
+                        {"type": "input_image", "image_url": image_url.get("url", "")}
+                    )
                     continue
             normalized.append(item_dict)
         return normalized

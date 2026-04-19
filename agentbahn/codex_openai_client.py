@@ -136,7 +136,9 @@ class CodexCredentials:
     def should_refresh(self) -> bool:
         if not self.is_chatgpt or not self.refresh_token or self.last_refresh is None:
             return False
-        return self.last_refresh < datetime.now(tz=UTC) - timedelta(days=TOKEN_REFRESH_INTERVAL_DAYS)
+        return self.last_refresh < datetime.now(tz=UTC) - timedelta(
+            days=TOKEN_REFRESH_INTERVAL_DAYS
+        )
 
     def apply_headers(self, headers: dict[str, str]) -> None:
         headers["Authorization"] = f"Bearer {self.token}"
@@ -165,10 +167,14 @@ def resolve_codex_credentials(
     auth_json = _load_auth_json(auth_file)
     auth_mode = auth_json.get("auth_mode")
 
-    if auth_mode == "api_key" or (auth_mode is None and auth_json.get("OPENAI_API_KEY")):
+    if auth_mode == "api_key" or (
+        auth_mode is None and auth_json.get("OPENAI_API_KEY")
+    ):
         api_key = auth_json.get("OPENAI_API_KEY")
         if not isinstance(api_key, str) or not api_key.strip():
-            raise CodexAuthError("Codex auth is configured for API-key mode but no key was stored")
+            raise CodexAuthError(
+                "Codex auth is configured for API-key mode but no key was stored"
+            )
         return CodexCredentials(
             auth_mode="api_key",
             token=api_key.strip(),
@@ -179,7 +185,9 @@ def resolve_codex_credentials(
 
     tokens = auth_json.get("tokens")
     if not isinstance(tokens, dict):
-        raise CodexAuthError("Codex auth is configured for ChatGPT mode but tokens are missing")
+        raise CodexAuthError(
+            "Codex auth is configured for ChatGPT mode but tokens are missing"
+        )
 
     access_token = tokens.get("access_token")
     if not isinstance(access_token, str) or not access_token.strip():
@@ -198,8 +206,12 @@ def resolve_codex_credentials(
         auth_mode="chatgpt",
         token=access_token.strip(),
         account_id=account_id,
-        refresh_token=refresh_token.strip() if isinstance(refresh_token, str) and refresh_token.strip() else None,
-        id_token=id_token.strip() if isinstance(id_token, str) and id_token.strip() else None,
+        refresh_token=refresh_token.strip()
+        if isinstance(refresh_token, str) and refresh_token.strip()
+        else None,
+        id_token=id_token.strip()
+        if isinstance(id_token, str) and id_token.strip()
+        else None,
         is_fedramp_account=_is_fedramp_account(
             id_token if isinstance(id_token, str) else None,
             access_token,
@@ -318,12 +330,16 @@ class CodexOpenAIClient:
             "client_metadata": client_metadata,
         }
 
-    def create_response(self, payload: Mapping[str, Any], *, path: str = "responses") -> dict[str, Any]:
+    def create_response(
+        self, payload: Mapping[str, Any], *, path: str = "responses"
+    ) -> dict[str, Any]:
         response = self._send_json_request(path=path, payload=payload)
         try:
             return response.json()
         except json.JSONDecodeError as exc:
-            raise CodexResponsesError("responses endpoint returned non-JSON content") from exc
+            raise CodexResponsesError(
+                "responses endpoint returned non-JSON content"
+            ) from exc
 
     def stream_response(
         self,
@@ -337,7 +353,9 @@ class CodexOpenAIClient:
         finally:
             response.close()
 
-    def _send_json_request(self, *, path: str, payload: Mapping[str, Any]) -> httpx.Response:
+    def _send_json_request(
+        self, *, path: str, payload: Mapping[str, Any]
+    ) -> httpx.Response:
         self._maybe_refresh_before_request()
         refreshed_after_401 = False
         for attempt in range(4):
@@ -353,7 +371,11 @@ class CodexOpenAIClient:
                 time.sleep(0.2 * (2**attempt))
                 continue
 
-            if response.status_code == 401 and self.credentials.is_chatgpt and not refreshed_after_401:
+            if (
+                response.status_code == 401
+                and self.credentials.is_chatgpt
+                and not refreshed_after_401
+            ):
                 response.close()
                 self._refresh_chatgpt_tokens()
                 refreshed_after_401 = True
@@ -369,7 +391,9 @@ class CodexOpenAIClient:
 
         raise CodexResponsesError("request failed after retry exhaustion")
 
-    def _send_stream_request(self, *, path: str, payload: Mapping[str, Any]) -> httpx.Response:
+    def _send_stream_request(
+        self, *, path: str, payload: Mapping[str, Any]
+    ) -> httpx.Response:
         self._maybe_refresh_before_request()
         refreshed_after_401 = False
         for attempt in range(4):
@@ -387,7 +411,11 @@ class CodexOpenAIClient:
                 time.sleep(0.2 * (2**attempt))
                 continue
 
-            if response.status_code == 401 and self.credentials.is_chatgpt and not refreshed_after_401:
+            if (
+                response.status_code == 401
+                and self.credentials.is_chatgpt
+                and not refreshed_after_401
+            ):
                 response.close()
                 self._refresh_chatgpt_tokens()
                 refreshed_after_401 = True
@@ -409,9 +437,13 @@ class CodexOpenAIClient:
 
     def _refresh_chatgpt_tokens(self) -> None:
         if not self.credentials.is_chatgpt or not self.credentials.refresh_token:
-            raise CodexAuthError("ChatGPT refresh requested but no refresh token is available")
+            raise CodexAuthError(
+                "ChatGPT refresh requested but no refresh token is available"
+            )
 
-        refresh_url = _trimmed_env(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR) or REFRESH_TOKEN_URL
+        refresh_url = (
+            _trimmed_env(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR) or REFRESH_TOKEN_URL
+        )
         response = self._http.post(
             refresh_url,
             headers={
@@ -443,9 +475,12 @@ class CodexOpenAIClient:
             self.credentials.refresh_token = new_refresh_token.strip()
 
         self.credentials.token = access_token.strip()
-        self.credentials.account_id = self.credentials.account_id or _extract_account_id(
-            self.credentials.id_token,
-            self.credentials.token,
+        self.credentials.account_id = (
+            self.credentials.account_id
+            or _extract_account_id(
+                self.credentials.id_token,
+                self.credentials.token,
+            )
         )
         self.credentials.is_fedramp_account = _is_fedramp_account(
             self.credentials.id_token,
@@ -468,7 +503,9 @@ class CodexOpenAIClient:
         if self.credentials.account_id:
             tokens["account_id"] = self.credentials.account_id
         auth_json["tokens"] = tokens
-        auth_json["last_refresh"] = _isoformat_utc(self.credentials.last_refresh or datetime.now(tz=UTC))
+        auth_json["last_refresh"] = _isoformat_utc(
+            self.credentials.last_refresh or datetime.now(tz=UTC)
+        )
         self.credentials.auth_file.parent.mkdir(parents=True, exist_ok=True)
         self.credentials.auth_file.write_text(json.dumps(auth_json, indent=2))
         self.credentials.auth_json = auth_json
@@ -496,7 +533,9 @@ class CodexOpenAIClient:
         if data_lines:
             yield self._decode_sse_event(event_name, data_lines)
 
-    def _decode_sse_event(self, event_name: str | None, data_lines: list[str]) -> SseEvent:
+    def _decode_sse_event(
+        self, event_name: str | None, data_lines: list[str]
+    ) -> SseEvent:
         data = "\n".join(data_lines)
         json_data: dict[str, Any] | None = None
         try:
@@ -522,11 +561,15 @@ class CodexOpenAIClient:
                     .get("incomplete_details", {})
                     .get("reason", "unknown")
                 )
-                raise CodexResponsesError(f"incomplete response returned, reason: {reason}")
+                raise CodexResponsesError(
+                    f"incomplete response returned, reason: {reason}"
+                )
 
         return SseEvent(event=event_name, data=data, json_data=json_data)
 
-    def _raise_for_status(self, response: httpx.Response, *, prefix: str = "request failed") -> None:
+    def _raise_for_status(
+        self, response: httpx.Response, *, prefix: str = "request failed"
+    ) -> None:
         if response.is_success:
             return
 
@@ -535,4 +578,6 @@ class CodexOpenAIClient:
             raise CodexResponsesError(
                 f"{prefix}: {response.status_code} {response.reason_phrase}: {detail}"
             )
-        raise CodexResponsesError(f"{prefix}: {response.status_code} {response.reason_phrase}")
+        raise CodexResponsesError(
+            f"{prefix}: {response.status_code} {response.reason_phrase}"
+        )

@@ -15,7 +15,9 @@ def fetch_features(
     transport: httpx.BaseTransport | None = None,
     client_factory: Callable[..., httpx.Client] = httpx.Client,
 ) -> FeatureListResponse:
-    with client_factory(base_url=get_api_base_url(), transport=transport, timeout=5.0) as client:
+    with client_factory(
+        base_url=get_api_base_url(), transport=transport, timeout=5.0
+    ) as client:
         response = client.get("/api/features")
         response.raise_for_status()
 

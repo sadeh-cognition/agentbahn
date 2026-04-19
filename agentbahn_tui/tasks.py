@@ -15,7 +15,9 @@ def fetch_tasks(
     transport: httpx.BaseTransport | None = None,
     client_factory: Callable[..., httpx.Client] = httpx.Client,
 ) -> TaskListResponse:
-    with client_factory(base_url=get_api_base_url(), transport=transport, timeout=5.0) as client:
+    with client_factory(
+        base_url=get_api_base_url(), transport=transport, timeout=5.0
+    ) as client:
         response = client.get("/api/tasks", params={"project_id": project_id})
         response.raise_for_status()
     return TypeAdapter(TaskListResponse).validate_python(response.json())

@@ -20,7 +20,9 @@ def fetch_event_logs(
 ) -> EventLogListResponse:
     collected_events: EventLogListResponse = []
 
-    with client_factory(base_url=get_api_base_url(), transport=transport, timeout=5.0) as client:
+    with client_factory(
+        base_url=get_api_base_url(), transport=transport, timeout=5.0
+    ) as client:
         page = 1
         while True:
             response = client.get(
@@ -34,7 +36,9 @@ def fetch_event_logs(
             )
             response.raise_for_status()
 
-            event_page = TypeAdapter(EventLogPageResponse).validate_python(response.json())
+            event_page = TypeAdapter(EventLogPageResponse).validate_python(
+                response.json()
+            )
             collected_events.extend(event_page.items)
             if page * event_page.page_size >= event_page.total:
                 break

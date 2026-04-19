@@ -58,7 +58,9 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
 def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
     entity_width = max(len("Entity"), *(len(entry.entity) for entry in entries))
     command_width = max(len("Command"), *(len(entry.command) for entry in entries))
-    arguments_width = max(len("Arguments"), *(len(entry.arguments) for entry in entries))
+    arguments_width = max(
+        len("Arguments"), *(len(entry.arguments) for entry in entries)
+    )
     description_width = max(
         len("Description"), *(len(entry.description) for entry in entries)
     )
@@ -298,7 +300,9 @@ class AgentbahnTui(App[None]):
         *,
         fetch_projects_command: Callable[[], ProjectListResponse] = fetch_projects,
         fetch_tasks_command: Callable[[int], TaskListResponse] = fetch_tasks,
-        fetch_project_events_command: Callable[[int], EventLogListResponse] = fetch_project_events,
+        fetch_project_events_command: Callable[
+            [int], EventLogListResponse
+        ] = fetch_project_events,
         history_file: Path | None = None,
     ) -> None:
         super().__init__()
@@ -306,7 +310,9 @@ class AgentbahnTui(App[None]):
         self._fetch_tasks_command = fetch_tasks_command
         self._fetch_project_events_command = fetch_project_events_command
         self._history_file = history_file or find_command_history_file()
-        self._command_history = CommandHistory(commands=load_command_history(self._history_file))
+        self._command_history = CommandHistory(
+            commands=load_command_history(self._history_file)
+        )
         self._suppressed_history_change_events = 0
 
     def compose(self) -> ComposeResult:
