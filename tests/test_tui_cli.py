@@ -6,6 +6,7 @@ from django.core.management import call_command
 
 from agentbahn.projects.schemas import TaskResponse
 from agentbahn_tui import cli
+from agentbahn_tui.tui import CommandResult
 from agentbahn_tui.tui import format_tasks_output
 from agentbahn_tui.tui import get_placeholder_message
 from agentbahn_tui.tui import run_tui_command
@@ -73,7 +74,25 @@ def test_run_tui_command_lists_tasks_for_project() -> None:
         ],
     )
 
-    assert output == "11. [todo] List tasks (feature: CLI, assignee: alice)"
+    assert output == CommandResult(
+        kind="tasks",
+        tasks=[
+            TaskResponse(
+                id=11,
+                project_id=7,
+                project_name="Roadmap",
+                feature_id=3,
+                feature_name="CLI",
+                user_id=5,
+                user_username="alice",
+                title="List tasks",
+                description="Show tasks for a project",
+                status="todo",
+                date_created="2026-04-19T10:00:00Z",
+                date_updated="2026-04-19T10:30:00Z",
+            )
+        ],
+    )
 
 
 def test_run_tui_command_validates_task_list_arguments() -> None:
@@ -83,7 +102,7 @@ def test_run_tui_command_validates_task_list_arguments() -> None:
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
         )
-        == "Usage: /task list PROJECT_ID"
+        == CommandResult(kind="message", message="Usage: /task list PROJECT_ID")
     )
     assert (
         run_tui_command(
@@ -91,9 +110,11 @@ def test_run_tui_command_validates_task_list_arguments() -> None:
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
         )
-        == "PROJECT_ID must be an integer."
+        == CommandResult(kind="message", message="PROJECT_ID must be an integer.")
     )
 
 
 def test_format_tasks_output_handles_empty_results() -> None:
-    assert format_tasks_output([]) == "No tasks found."
+    assert format_tasks_output([]) == CommandResult(
+        kind="message", message="No tasks found."
+    )
