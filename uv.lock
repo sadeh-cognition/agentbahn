@@ -11,6 +11,7 @@ dependencies = [
     { name = "django-click" },
     { name = "django-ninja" },
     { name = "dspy" },
+    { name = "dspy-codex" },
     { name = "httpx" },
     { name = "textual" },
 ]
@@ -31,6 +32,7 @@ requires-dist = [
     { name = "django-click", specifier = ">=2.5.0" },
     { name = "django-ninja" },
     { name = "dspy", specifier = ">=3.1.3" },
+    { name = "dspy-codex", editable = "../dspy_codex" },
     { name = "httpx" },
     { name = "textual", specifier = ">=8.2.4" },
 ]
@@ -405,6 +407,24 @@ sdist = { url = "https://files.pythonhosted.org/packages/30/06/1b693d28a08e7a8b9
 wheels = [
     { url = "https://files.pythonhosted.org/packages/47/83/2432c2f987e738e4c15dfa3497daa5811a145facf4525bebcb9d240736db/dspy-3.1.3-py3-none-any.whl", hash = "sha256:26f983372ebb284324cc2162458f7bce509ef5ef7b48be4c9f490fa06ea73e37", size = 312353, upload-time = "2026-02-05T16:24:16.753Z" },
 ]
+
+[[package]]
+name = "dspy-codex"
+version = "0.1.0"
+source = { editable = "../dspy_codex" }
+dependencies = [
+    { name = "dspy" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dspy", specifier = ">=3.1.3" },
+    { name = "httpx" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "fastuuid"

@@ -1,8 +1,8 @@
-from agentbahn.codex_openai_client import CodexCredentials
-from agentbahn.codex_openai_client import CodexOpenAIClient
-from agentbahn.codex_openai_client import SseEvent
-from agentbahn.dspy_lm import CodexDSPyLM
-from agentbahn.codex_openai_client import resolve_codex_credentials
+from dspy_codex import CodexCredentials
+from dspy_codex import CodexDSPyLM
+from dspy_codex import CodexOpenAIClient
+from dspy_codex import SseEvent
+from dspy_codex import resolve_codex_credentials
 
 __all__ = [
     "CodexCredentials",

@@ -13,6 +13,7 @@ dependencies = [
     "django-click>=2.5.0",
     "django-ninja",
     "dspy>=3.1.3",
+    "dspy-codex",
     "httpx",
     "textual>=8.2.4",
 ]
@@ -52,3 +53,6 @@ django_settings_module = "agentbahn.settings"
 
 [tool.setuptools.packages.find]
 include = ["agentbahn", "agentbahn.*", "agentbahn_tui", "agentbahn_tui.*"]
+
+[tool.uv.sources]
+dspy-codex = { path = "../dspy_codex", editable = true }
