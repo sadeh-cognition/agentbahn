@@ -28,8 +28,15 @@ from agentbahn_tui.tui import run_tui_command
 def test_placeholder_message_is_stable() -> None:
     assert (
         get_placeholder_message()
-        == "Enter /project list, /project event list PROJECT_ID, or /task list PROJECT_ID "
-        "to fetch data from projectbahn."
+        == "Available commands:\n"
+        "\n"
+        "Entity  | Command             | Arguments  | Description\n"
+        "--------+---------------------+------------+---------------------------------------------------------------\n"
+        "project | /project list       | -          | List all projects.\n"
+        "project | /project event list | PROJECT_ID | List event log entries for a project and its related entities.\n"
+        "task    | /task list          | PROJECT_ID | List tasks for a project.\n"
+        "\n"
+        "Type a command below and press Enter."
     )
 
 

@@ -25,11 +25,81 @@ from agentbahn_tui.projects import fetch_projects
 from agentbahn_tui.tasks import fetch_tasks
 
 
-def get_placeholder_message() -> str:
-    return (
-        "Enter /project list, /project event list PROJECT_ID, or /task list PROJECT_ID "
-        "to fetch data from projectbahn."
+@dataclass(frozen=True)
+class CommandHelpEntry:
+    entity: str
+    command: str
+    arguments: str
+    description: str
+
+
+COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
+    CommandHelpEntry(
+        entity="project",
+        command="/project list",
+        arguments="-",
+        description="List all projects.",
+    ),
+    CommandHelpEntry(
+        entity="project",
+        command="/project event list",
+        arguments="PROJECT_ID",
+        description="List event log entries for a project and its related entities.",
+    ),
+    CommandHelpEntry(
+        entity="task",
+        command="/task list",
+        arguments="PROJECT_ID",
+        description="List tasks for a project.",
+    ),
+)
+
+
+def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
+    entity_width = max(len("Entity"), *(len(entry.entity) for entry in entries))
+    command_width = max(len("Command"), *(len(entry.command) for entry in entries))
+    arguments_width = max(len("Arguments"), *(len(entry.arguments) for entry in entries))
+    description_width = max(
+        len("Description"), *(len(entry.description) for entry in entries)
     )
+
+    def format_row(entity: str, command: str, arguments: str, description: str) -> str:
+        return (
+            f"{entity.ljust(entity_width)} | "
+            f"{command.ljust(command_width)} | "
+            f"{arguments.ljust(arguments_width)} | "
+            f"{description.ljust(description_width)}"
+        ).rstrip()
+
+    separator = "-+-".join(
+        [
+            "-" * entity_width,
+            "-" * command_width,
+            "-" * arguments_width,
+            "-" * description_width,
+        ]
+    )
+    rows = [
+        "Available commands:",
+        "",
+        format_row("Entity", "Command", "Arguments", "Description"),
+        separator,
+    ]
+    rows.extend(
+        format_row(entry.entity, entry.command, entry.arguments, entry.description)
+        for entry in entries
+    )
+    rows.extend(
+        [
+            "",
+            "Type a command below and press Enter.",
+        ]
+    )
+    return "\n".join(rows)
+
+
+def get_placeholder_message() -> str:
+    return _build_help_table(COMMAND_HELP_ENTRIES)
 
 
 def find_agentbahn_home() -> Path:
