@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from textual.binding import Binding
@@ -29,6 +30,43 @@ def get_placeholder_message() -> str:
         "Enter /project list, /project event list PROJECT_ID, or /task list PROJECT_ID "
         "to fetch data from projectbahn."
     )
+
+
+def find_agentbahn_home() -> Path:
+    return Path.home() / ".agentbahn"
+
+
+def find_command_history_file() -> Path:
+    return find_agentbahn_home() / "command_history"
+
+
+def load_command_history(history_file: Path) -> list[str]:
+    try:
+        history_contents = history_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return []
+
+    commands: list[str] = []
+    for line in history_contents.splitlines():
+        normalized_command = line.strip()
+        if normalized_command:
+            commands.append(normalized_command)
+    return commands
+
+
+def append_command_history(history_file: Path, command: str) -> None:
+    normalized_command = command.strip()
+    if not normalized_command:
+        return
+
+    try:
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        with history_file.open("a", encoding="utf-8") as history_handle:
+            history_handle.write(f"{normalized_command}\n")
+    except OSError:
+        return
 
 
 @dataclass
@@ -191,12 +229,14 @@ class AgentbahnTui(App[None]):
         fetch_projects_command: Callable[[], ProjectListResponse] = fetch_projects,
         fetch_tasks_command: Callable[[int], TaskListResponse] = fetch_tasks,
         fetch_project_events_command: Callable[[int], EventLogListResponse] = fetch_project_events,
+        history_file: Path | None = None,
     ) -> None:
         super().__init__()
         self._fetch_projects_command = fetch_projects_command
         self._fetch_tasks_command = fetch_tasks_command
         self._fetch_project_events_command = fetch_project_events_command
-        self._command_history = CommandHistory(commands=[])
+        self._history_file = history_file or find_command_history_file()
+        self._command_history = CommandHistory(commands=load_command_history(self._history_file))
         self._suppressed_history_change_events = 0
 
     def compose(self) -> ComposeResult:
@@ -291,6 +331,7 @@ class AgentbahnTui(App[None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._command_history.record(event.value)
+        append_command_history(self._history_file, event.value)
         result = run_tui_command(
             event.value,
             self._fetch_projects_command,

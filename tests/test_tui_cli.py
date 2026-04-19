@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 
 from agentbahn.projects.schemas import EventLogResponse
 from agentbahn.projects.schemas import FeatureResponse
 from django.core.management import call_command
 
+from agentbahn_tui.project_events import FEATURE_EVENT_ENTITY_TYPE
+from agentbahn_tui.project_events import PROJECT_EVENT_ENTITY_TYPE
+from agentbahn_tui.project_events import TASK_EVENT_ENTITY_TYPE
 from agentbahn_tui.project_events import fetch_project_events
 from agentbahn.projects.schemas import TaskResponse
 from agentbahn_tui import cli
 from agentbahn_tui.tui import AgentbahnTui
+from agentbahn_tui.tui import append_command_history
 from agentbahn_tui.tui import CommandHistory
 from agentbahn_tui.tui import CommandResult
 from agentbahn_tui.tui import format_event_details
 from agentbahn_tui.tui import format_tasks_output
 from agentbahn_tui.tui import get_placeholder_message
+from agentbahn_tui.tui import load_command_history
 from agentbahn_tui.tui import run_tui_command
 
 
@@ -224,14 +230,58 @@ def test_fetch_project_events_includes_project_feature_and_task_events() -> None
     )
 
     assert [(event.id, event.entity_type, event.entity_id) for event in events] == [
-        (111, "task", 11),
-        (107, "project", 7),
-        (103, "feature", 3),
+        (111, TASK_EVENT_ENTITY_TYPE, 11),
+        (107, PROJECT_EVENT_ENTITY_TYPE, 7),
+        (103, FEATURE_EVENT_ENTITY_TYPE, 3),
     ]
 
 
 def test_format_event_details_sorts_keys_for_stable_display() -> None:
     assert format_event_details({"b": 2, "a": 1}) == '{"a": 1, "b": 2}'
+
+
+def test_fetch_project_events_uses_backend_entity_type_values() -> None:
+    requested_entity_keys: list[tuple[str, int]] = []
+
+    fetch_project_events(
+        4,
+        fetch_features_command=lambda project_id: [
+            FeatureResponse(
+                id=8,
+                project_id=project_id or 0,
+                parent_feature_id=None,
+                name="Events",
+                description="Project event list",
+                date_created="2026-04-19T10:00:00Z",
+                date_updated="2026-04-19T10:30:00Z",
+            )
+        ],
+        fetch_tasks_command=lambda project_id: [
+            TaskResponse(
+                id=15,
+                project_id=project_id,
+                project_name="Roadmap",
+                feature_id=8,
+                feature_name="Events",
+                user_id=2,
+                user_username="alice",
+                title="Inspect logs",
+                description="Inspect project event logs",
+                status="todo",
+                date_created="2026-04-19T10:00:00Z",
+                date_updated="2026-04-19T10:30:00Z",
+            )
+        ],
+        fetch_event_logs_command=lambda entity_type, entity_id: (
+            requested_entity_keys.append((entity_type, entity_id)) or []
+        ),
+    )
+
+    assert requested_entity_keys == [
+        (PROJECT_EVENT_ENTITY_TYPE, 4),
+        (FEATURE_EVENT_ENTITY_TYPE, 8),
+        (TASK_EVENT_ENTITY_TYPE, 15),
+    ]
 
 
 def test_command_history_navigates_backwards_and_restores_draft() -> None:
@@ -247,12 +297,31 @@ def test_command_history_navigates_backwards_and_restores_draft() -> None:
     assert history.next() is None
 
 
-def test_tui_command_history_uses_up_and_down_keys() -> None:
+def test_command_history_file_loads_non_empty_commands(tmp_path) -> None:
+    history_file = tmp_path / "command_history"
+    history_file.write_text("/project list\n\n /task list 7 \n", encoding="utf-8")
+
+    assert load_command_history(history_file) == ["/project list", "/task list 7"]
+
+
+def test_command_history_file_appends_commands(tmp_path) -> None:
+    history_file = tmp_path / "state" / "command_history"
+
+    append_command_history(history_file, "/project list")
+    append_command_history(history_file, "   ")
+    append_command_history(history_file, " /task list 7 ")
+
+    assert history_file.read_text(encoding="utf-8") == "/project list\n/task list 7\n"
+
+
+def test_tui_command_history_uses_up_and_down_keys(tmp_path) -> None:
     async def run_test() -> None:
+        history_file = tmp_path / "command_history"
         app = AgentbahnTui(
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
             fetch_project_events_command=lambda _project_id: [],
+            history_file=history_file,
         )
 
         async with app.run_test() as pilot:
@@ -274,3 +343,39 @@ def test_tui_command_history_uses_up_and_down_keys() -> None:
             assert app.query_one("#command-input").value == "/draft"
 
     asyncio.run(run_test())
+
+
+def test_tui_command_history_persists_across_sessions(tmp_path) -> None:
+    async def first_session(history_file: Path) -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            history_file=history_file,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "p", "r", "o", "j", "e", "c", "t", " ", "l", "i", "s", "t")
+            await pilot.press("enter")
+            await pilot.press("/", "t", "a", "s", "k", " ", "l", "i", "s", "t", " ", "7")
+            await pilot.press("enter")
+
+    async def second_session(history_file: Path) -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            history_file=history_file,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("up")
+            assert app.query_one("#command-input").value == "/task list 7"
+            await pilot.press("up")
+            assert app.query_one("#command-input").value == "/project list"
+
+    history_file = tmp_path / "command_history"
+
+    asyncio.run(first_session(history_file))
+    assert history_file.read_text(encoding="utf-8") == "/project list\n/task list 7\n"
+    asyncio.run(second_session(history_file))
