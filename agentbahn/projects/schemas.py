@@ -12,3 +12,21 @@ class ProjectResponse(Schema):
 
 
 ProjectListResponse = list[ProjectResponse]
+
+
+class TaskResponse(Schema):
+    id: int
+    project_id: int
+    project_name: str
+    feature_id: int
+    feature_name: str
+    user_id: int
+    user_username: str
+    title: str
+    description: str
+    status: str
+    date_created: str
+    date_updated: str
+
+
+TaskListResponse = list[TaskResponse]
