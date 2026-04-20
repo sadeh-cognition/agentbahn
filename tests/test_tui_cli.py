@@ -30,11 +30,11 @@ def test_placeholder_message_is_stable() -> None:
         get_placeholder_message()
         == "Available commands:\n"
         "\n"
-        "Entity  | Command             | Arguments  | Description\n"
-        "--------+---------------------+------------+---------------------------------------------------------------\n"
-        "project | /project list       | -          | List all projects.\n"
-        "project | /project event list | PROJECT_ID | List event log entries for a project and its related entities.\n"
-        "task    | /task list          | PROJECT_ID | List tasks for a project.\n"
+        "Entity  | Command             | Shortcut | Arguments  | Description\n"
+        "--------+---------------------+----------+------------+---------------------------------------------------------------\n"
+        "project | /project list       | /pl      | -          | List all projects.\n"
+        "project | /project event list | /pel     | PROJECT_ID | List event log entries for a project and its related entities.\n"
+        "task    | /task list          | /tl      | PROJECT_ID | List tasks for a project.\n"
         "\n"
         "Type a command below and press Enter."
     )
@@ -74,47 +74,43 @@ def test_console_script_dispatches_to_management_command(monkeypatch) -> None:
 
 
 def test_run_tui_command_lists_tasks_for_project() -> None:
+    expected_tasks = [
+        TaskResponse(
+            id=11,
+            project_id=7,
+            project_name="Roadmap",
+            feature_id=3,
+            feature_name="CLI",
+            user_id=5,
+            user_username="alice",
+            title="List tasks",
+            description="Show tasks for a project",
+            status="todo",
+            date_created="2026-04-19T10:00:00Z",
+            date_updated="2026-04-19T10:30:00Z",
+        )
+    ]
+    
+    def fetch_tasks_cmd(project_id):
+        return expected_tasks
+
     output = run_tui_command(
         "/task list 7",
         fetch_projects_command=lambda: [],
-        fetch_tasks_command=lambda project_id: [
-            TaskResponse(
-                id=11,
-                project_id=project_id,
-                project_name="Roadmap",
-                feature_id=3,
-                feature_name="CLI",
-                user_id=5,
-                user_username="alice",
-                title="List tasks",
-                description="Show tasks for a project",
-                status="todo",
-                date_created="2026-04-19T10:00:00Z",
-                date_updated="2026-04-19T10:30:00Z",
-            )
-        ],
+        fetch_tasks_command=fetch_tasks_cmd,
         fetch_project_events_command=lambda _project_id: [],
     )
 
-    assert output == CommandResult(
-        kind="tasks",
-        tasks=[
-            TaskResponse(
-                id=11,
-                project_id=7,
-                project_name="Roadmap",
-                feature_id=3,
-                feature_name="CLI",
-                user_id=5,
-                user_username="alice",
-                title="List tasks",
-                description="Show tasks for a project",
-                status="todo",
-                date_created="2026-04-19T10:00:00Z",
-                date_updated="2026-04-19T10:30:00Z",
-            )
-        ],
+    assert output == CommandResult(kind="tasks", tasks=expected_tasks)
+
+    shortcut_output = run_tui_command(
+        "/tl 7",
+        fetch_projects_command=lambda: [],
+        fetch_tasks_command=fetch_tasks_cmd,
+        fetch_project_events_command=lambda _project_id: [],
     )
+
+    assert shortcut_output == CommandResult(kind="tasks", tasks=expected_tasks)
 
 
 def test_run_tui_command_validates_task_list_arguments() -> None:
@@ -129,6 +125,15 @@ def test_run_tui_command_validates_task_list_arguments() -> None:
     )
     assert (
         run_tui_command(
+            "/tl",
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+        )
+        == CommandResult(kind="message", message="Usage: /tl PROJECT_ID")
+    )
+    assert (
+        run_tui_command(
             "/task list abc",
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
@@ -137,36 +142,37 @@ def test_run_tui_command_validates_task_list_arguments() -> None:
         == CommandResult(kind="message", message="PROJECT_ID must be an integer.")
     )
 
-
 def test_run_tui_command_lists_project_events() -> None:
+    expected_events = [
+        EventLogResponse(
+            id=21,
+            entity_type="task",
+            entity_id=13,
+            event_type="task.updated",
+            event_details={"project_id": 7, "status": "done"},
+        )
+    ]
+
+    def fetch_project_events_cmd(project_id):
+        return expected_events
+
     output = run_tui_command(
         "/project event list 7",
         fetch_projects_command=lambda: [],
         fetch_tasks_command=lambda _project_id: [],
-        fetch_project_events_command=lambda project_id: [
-            EventLogResponse(
-                id=21,
-                entity_type="task",
-                entity_id=13,
-                event_type="task.updated",
-                event_details={"project_id": project_id, "status": "done"},
-            )
-        ],
+        fetch_project_events_command=fetch_project_events_cmd,
     )
 
-    assert output == CommandResult(
-        kind="events",
-        events=[
-            EventLogResponse(
-                id=21,
-                entity_type="task",
-                entity_id=13,
-                event_type="task.updated",
-                event_details={"project_id": 7, "status": "done"},
-            )
-        ],
+    assert output == CommandResult(kind="events", events=expected_events)
+
+    shortcut_output = run_tui_command(
+        "/pel 7",
+        fetch_projects_command=lambda: [],
+        fetch_tasks_command=lambda _project_id: [],
+        fetch_project_events_command=fetch_project_events_cmd,
     )
 
+    assert shortcut_output == CommandResult(kind="events", events=expected_events)
 
 def test_run_tui_command_validates_project_event_arguments() -> None:
     assert (
@@ -180,6 +186,15 @@ def test_run_tui_command_validates_project_event_arguments() -> None:
     )
     assert (
         run_tui_command(
+            "/pel",
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+        )
+        == CommandResult(kind="message", message="Usage: /pel PROJECT_ID")
+    )
+    assert (
+        run_tui_command(
             "/project event list abc",
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
@@ -187,7 +202,6 @@ def test_run_tui_command_validates_project_event_arguments() -> None:
         )
         == CommandResult(kind="message", message="PROJECT_ID must be an integer.")
     )
-
 
 def test_format_tasks_output_handles_empty_results() -> None:
     assert format_tasks_output([]) == CommandResult(

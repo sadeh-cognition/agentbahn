@@ -29,6 +29,7 @@ from agentbahn_tui.tasks import fetch_tasks
 class CommandHelpEntry:
     entity: str
     command: str
+    shortcut: str
     arguments: str
     description: str
 
@@ -37,18 +38,21 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
     CommandHelpEntry(
         entity="project",
         command="/project list",
+        shortcut="/pl",
         arguments="-",
         description="List all projects.",
     ),
     CommandHelpEntry(
         entity="project",
         command="/project event list",
+        shortcut="/pel",
         arguments="PROJECT_ID",
         description="List event log entries for a project and its related entities.",
     ),
     CommandHelpEntry(
         entity="task",
         command="/task list",
+        shortcut="/tl",
         arguments="PROJECT_ID",
         description="List tasks for a project.",
     ),
@@ -58,6 +62,7 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
 def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
     entity_width = max(len("Entity"), *(len(entry.entity) for entry in entries))
     command_width = max(len("Command"), *(len(entry.command) for entry in entries))
+    shortcut_width = max(len("Shortcut"), *(len(entry.shortcut) for entry in entries))
     arguments_width = max(
         len("Arguments"), *(len(entry.arguments) for entry in entries)
     )
@@ -65,10 +70,13 @@ def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
         len("Description"), *(len(entry.description) for entry in entries)
     )
 
-    def format_row(entity: str, command: str, arguments: str, description: str) -> str:
+    def format_row(
+        entity: str, command: str, shortcut: str, arguments: str, description: str
+    ) -> str:
         return (
             f"{entity.ljust(entity_width)} | "
             f"{command.ljust(command_width)} | "
+            f"{shortcut.ljust(shortcut_width)} | "
             f"{arguments.ljust(arguments_width)} | "
             f"{description.ljust(description_width)}"
         ).rstrip()
@@ -77,6 +85,7 @@ def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
         [
             "-" * entity_width,
             "-" * command_width,
+            "-" * shortcut_width,
             "-" * arguments_width,
             "-" * description_width,
         ]
@@ -84,11 +93,17 @@ def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
     rows = [
         "Available commands:",
         "",
-        format_row("Entity", "Command", "Arguments", "Description"),
+        format_row("Entity", "Command", "Shortcut", "Arguments", "Description"),
         separator,
     ]
     rows.extend(
-        format_row(entry.entity, entry.command, entry.arguments, entry.description)
+        format_row(
+            entry.entity,
+            entry.command,
+            entry.shortcut,
+            entry.arguments,
+            entry.description,
+        )
         for entry in entries
     )
     rows.extend(
@@ -223,30 +238,39 @@ def run_tui_command(
     fetch_project_events_command: Callable[[int], EventLogListResponse],
 ) -> CommandResult:
     normalized_command = command.strip()
-    if normalized_command == "/project list":
+    if normalized_command in ("/project list", "/pl"):
         return format_projects_output(fetch_projects_command())
 
     command_parts = normalized_command.split()
-    if command_parts[:3] == ["/project", "event", "list"]:
-        if len(command_parts) != 4:
-            return message_result("Usage: /project event list PROJECT_ID")
+    if command_parts[:3] == ["/project", "event", "list"] or command_parts[:1] == ["/pel"]:
+        expected_len = 4 if command_parts[0] == "/project" else 2
+        id_index = 3 if command_parts[0] == "/project" else 1
+
+        if len(command_parts) != expected_len:
+            cmd_str = "/project event list" if command_parts[0] == "/project" else "/pel"
+            return message_result(f"Usage: {cmd_str} PROJECT_ID")
 
         try:
-            project_id = int(command_parts[3])
+            project_id = int(command_parts[id_index])
         except ValueError:
             return message_result("PROJECT_ID must be an integer.")
         return format_project_events_output(fetch_project_events_command(project_id))
 
-    if command_parts[:2] != ["/task", "list"]:
-        return message_result(f"Unknown command: {normalized_command or '<empty>'}")
-    if len(command_parts) != 3:
-        return message_result("Usage: /task list PROJECT_ID")
+    if command_parts[:2] == ["/task", "list"] or command_parts[:1] == ["/tl"]:
+        expected_len = 3 if command_parts[0] == "/task" else 2
+        id_index = 2 if command_parts[0] == "/task" else 1
 
-    try:
-        project_id = int(command_parts[2])
-    except ValueError:
-        return message_result("PROJECT_ID must be an integer.")
-    return format_tasks_output(fetch_tasks_command(project_id))
+        if len(command_parts) != expected_len:
+            cmd_str = "/task list" if command_parts[0] == "/task" else "/tl"
+            return message_result(f"Usage: {cmd_str} PROJECT_ID")
+
+        try:
+            project_id = int(command_parts[id_index])
+        except ValueError:
+            return message_result("PROJECT_ID must be an integer.")
+        return format_tasks_output(fetch_tasks_command(project_id))
+
+    return message_result(f"Unknown command: {normalized_command or '<empty>'}")
 
 
 class CommandInput(Input):
