@@ -4,7 +4,6 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from textual.binding import Binding
 from textual.app import App
@@ -17,9 +16,19 @@ from textual.widgets import Header
 from textual.widgets import Input
 from textual.widgets import Static
 
+from agentbahn.llms.schemas import LlmConfigLookupResponse
+from agentbahn.llms.schemas import LlmConfigResponse
+from agentbahn.llms.schemas import LlmConfigUpsertRequest
 from agentbahn.projects.schemas import EventLogListResponse
 from agentbahn.projects.schemas import ProjectListResponse
 from agentbahn.projects.schemas import TaskListResponse
+from agentbahn_tui.command_results import CommandResult
+from agentbahn_tui.command_results import message_result
+from agentbahn_tui.llm_commands import LlmConfigurationPromptState
+from agentbahn_tui.llm_commands import continue_llm_configuration
+from agentbahn_tui.llm_commands import start_llm_command
+from agentbahn_tui.llms import fetch_llm_config
+from agentbahn_tui.llms import save_llm_config
 from agentbahn_tui.project_events import fetch_project_events
 from agentbahn_tui.projects import fetch_projects
 from agentbahn_tui.tasks import fetch_tasks
@@ -55,6 +64,13 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
         shortcut="/tl",
         arguments="PROJECT_ID",
         description="List tasks for a project.",
+    ),
+    CommandHelpEntry(
+        entity="llm",
+        command="/llm",
+        shortcut="-",
+        arguments="-",
+        description="Show or configure the LLM used by agentbahn.",
     ),
 )
 
@@ -196,19 +212,6 @@ class CommandHistory:
         self.index = None
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    kind: Literal["message", "projects", "tasks", "events"]
-    message: str | None = None
-    projects: ProjectListResponse | None = None
-    tasks: TaskListResponse | None = None
-    events: EventLogListResponse | None = None
-
-
-def message_result(message: str) -> CommandResult:
-    return CommandResult(kind="message", message=message)
-
-
 def format_projects_output(projects: ProjectListResponse) -> CommandResult:
     if not projects:
         return message_result("No projects found.")
@@ -242,12 +245,16 @@ def run_tui_command(
         return format_projects_output(fetch_projects_command())
 
     command_parts = normalized_command.split()
-    if command_parts[:3] == ["/project", "event", "list"] or command_parts[:1] == ["/pel"]:
+    if command_parts[:3] == ["/project", "event", "list"] or command_parts[:1] == [
+        "/pel"
+    ]:
         expected_len = 4 if command_parts[0] == "/project" else 2
         id_index = 3 if command_parts[0] == "/project" else 1
 
         if len(command_parts) != expected_len:
-            cmd_str = "/project event list" if command_parts[0] == "/project" else "/pel"
+            cmd_str = (
+                "/project event list" if command_parts[0] == "/project" else "/pel"
+            )
             return message_result(f"Usage: {cmd_str} PROJECT_ID")
 
         try:
@@ -327,17 +334,26 @@ class AgentbahnTui(App[None]):
         fetch_project_events_command: Callable[
             [int], EventLogListResponse
         ] = fetch_project_events,
+        fetch_llm_config_command: Callable[
+            [], LlmConfigLookupResponse
+        ] = fetch_llm_config,
+        save_llm_config_command: Callable[
+            [LlmConfigUpsertRequest], LlmConfigResponse
+        ] = save_llm_config,
         history_file: Path | None = None,
     ) -> None:
         super().__init__()
         self._fetch_projects_command = fetch_projects_command
         self._fetch_tasks_command = fetch_tasks_command
         self._fetch_project_events_command = fetch_project_events_command
+        self._fetch_llm_config_command = fetch_llm_config_command
+        self._save_llm_config_command = save_llm_config_command
         self._history_file = history_file or find_command_history_file()
         self._command_history = CommandHistory(
             commands=load_command_history(self._history_file)
         )
         self._suppressed_history_change_events = 0
+        self._llm_prompt_state: LlmConfigurationPromptState | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -408,6 +424,10 @@ class AgentbahnTui(App[None]):
         command_input.value = value
         command_input.cursor_position = len(value)
 
+    def _set_command_input_secret_mode(self, enabled: bool) -> None:
+        command_input = self.query_one("#command-input", Input)
+        command_input.password = enabled
+
     def show_previous_command(self) -> None:
         command_input = self.query_one("#command-input", Input)
         previous_command = self._command_history.previous(command_input.value)
@@ -430,14 +450,33 @@ class AgentbahnTui(App[None]):
             self._command_history.index = None
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self._command_history.record(event.value)
-        append_command_history(self._history_file, event.value)
-        result = run_tui_command(
-            event.value,
-            self._fetch_projects_command,
-            self._fetch_tasks_command,
-            self._fetch_project_events_command,
-        )
+        normalized_value = event.value.strip()
+        if self._llm_prompt_state is not None:
+            transition = continue_llm_configuration(
+                self._llm_prompt_state,
+                event.value,
+                self._save_llm_config_command,
+            )
+            self._llm_prompt_state = transition.next_state
+            self._set_command_input_secret_mode(transition.secret_input)
+            result = transition.result
+        elif normalized_value == "/llm":
+            self._command_history.record(event.value)
+            append_command_history(self._history_file, event.value)
+            transition = start_llm_command(self._fetch_llm_config_command)
+            self._llm_prompt_state = transition.next_state
+            self._set_command_input_secret_mode(transition.secret_input)
+            result = transition.result
+        else:
+            self._command_history.record(event.value)
+            append_command_history(self._history_file, event.value)
+            self._set_command_input_secret_mode(False)
+            result = run_tui_command(
+                event.value,
+                self._fetch_projects_command,
+                self._fetch_tasks_command,
+                self._fetch_project_events_command,
+            )
         if result.kind == "projects" and result.projects is not None:
             self._show_projects(result.projects)
         elif result.kind == "tasks" and result.tasks is not None:
