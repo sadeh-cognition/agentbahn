@@ -10,7 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -123,3 +126,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 PROJECTBAHN_API_BASE_URL = "http://localhost:8001"
 
 API_BASE_URL = "http://localhost:8002"
+
+LLM_API_KEY_ENCRYPTION_KEY = os.environ.get("LLM_API_KEY_ENCRYPTION_KEY")
+if not LLM_API_KEY_ENCRYPTION_KEY:
+    raise ImproperlyConfigured(
+        "LLM_API_KEY_ENCRYPTION_KEY environment variable must be set."
+    )

@@ -15,7 +15,7 @@ def serialize_llm_configuration(config: LlmConfiguration) -> LlmConfigResponse:
     return LlmConfigResponse(
         provider=config.provider,
         llm_name=config.llm_name,
-        api_key_configured=bool(config.api_key_hash),
+        api_key_configured=bool(config.encrypted_api_key),
     )
 
 
@@ -25,7 +25,7 @@ def upsert_llm_configuration(payload: LlmConfigUpsertRequest) -> LlmConfiguratio
         defaults={
             "provider": payload.provider,
             "llm_name": payload.llm_name,
-            "api_key_hash": payload.api_key,
+            "encrypted_api_key": payload.api_key,
         },
     )
     return config

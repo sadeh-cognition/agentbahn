@@ -9,6 +9,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "cryptography>=47.0.0",
     "django>=6.0.4",
     "django-click>=2.5.0",
     "django-ninja",
