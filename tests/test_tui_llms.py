@@ -7,6 +7,8 @@ import httpx
 from agentbahn.llms.schemas import LlmConfigLookupResponse
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
+from agentbahn_tui.backend import BackendUnavailableError
+from agentbahn_tui.backend import check_backend_server_running
 from agentbahn_tui.llm_commands import continue_llm_configuration
 from agentbahn_tui.llm_commands import start_llm_command
 from agentbahn_tui.llms import fetch_llm_config
@@ -75,6 +77,31 @@ def test_save_llm_config_posts_schema_payload(settings) -> None:
         llm_name="llama-3.1-8b-instant",
         api_key_configured=True,
     )
+
+
+def test_check_backend_server_running_uses_health_endpoint(settings) -> None:
+    settings.API_BASE_URL = "http://testserver"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/health"
+        return httpx.Response(200, json={"status": "ok"})
+
+    check_backend_server_running(transport=httpx.MockTransport(handler))
+
+
+def test_check_backend_server_running_raises_when_unavailable(settings) -> None:
+    settings.API_BASE_URL = "http://testserver"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    try:
+        check_backend_server_running(transport=httpx.MockTransport(handler))
+    except BackendUnavailableError as exc:
+        assert "http://testserver" in str(exc)
+    else:
+        raise AssertionError("Expected BackendUnavailableError")
 
 
 def test_start_llm_command_shows_existing_configuration() -> None:

@@ -15,6 +15,8 @@ from agentbahn_tui.command_results import CommandResult
 from agentbahn_tui.project_events import fetch_project_events
 from agentbahn.projects.schemas import TaskResponse
 from agentbahn_tui import cli
+from agentbahn_tui.backend import BackendUnavailableError
+from agentbahn_tui.tui import run_tui
 from agentbahn_tui.tui import AgentbahnTui
 from agentbahn_tui.tui import append_command_history
 from agentbahn_tui.tui import CommandHistory
@@ -53,6 +55,44 @@ def test_management_command_starts_tui(monkeypatch) -> None:
     call_command("start_tui")
 
     assert calls == ["started"]
+
+
+def test_run_tui_checks_backend_before_starting_app(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_backend_check() -> None:
+        calls.append("checked")
+
+    def fake_app_run(self) -> None:
+        calls.append("started")
+
+    monkeypatch.setattr(AgentbahnTui, "run", fake_app_run)
+
+    run_tui(backend_check=fake_backend_check)
+
+    assert calls == ["checked", "started"]
+
+
+def test_run_tui_raises_when_backend_check_fails(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_backend_check() -> None:
+        calls.append("checked")
+        raise BackendUnavailableError("backend unavailable")
+
+    def fake_app_run(self) -> None:
+        calls.append("started")
+
+    monkeypatch.setattr(AgentbahnTui, "run", fake_app_run)
+
+    try:
+        run_tui(backend_check=fake_backend_check)
+    except BackendUnavailableError as exc:
+        assert str(exc) == "backend unavailable"
+    else:
+        raise AssertionError("Expected BackendUnavailableError")
+
+    assert calls == ["checked"]
 
 
 def test_console_script_dispatches_to_management_command(monkeypatch) -> None:

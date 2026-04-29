@@ -16,6 +16,13 @@ from agentbahn.llms.models import LlmConfiguration
 client = TestClient(api)
 
 
+def test_health_endpoint_reports_ok() -> None:
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_get_llm_config_returns_absent_state(db) -> None:
     response = client.get("/api/llm-config")
 

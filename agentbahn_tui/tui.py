@@ -22,6 +22,7 @@ from agentbahn.llms.schemas import LlmConfigUpsertRequest
 from agentbahn.projects.schemas import EventLogListResponse
 from agentbahn.projects.schemas import ProjectListResponse
 from agentbahn.projects.schemas import TaskListResponse
+from agentbahn_tui.backend import check_backend_server_running
 from agentbahn_tui.command_results import CommandResult
 from agentbahn_tui.command_results import message_result
 from agentbahn_tui.llm_commands import LlmConfigurationPromptState
@@ -489,5 +490,8 @@ class AgentbahnTui(App[None]):
         event.input.focus()
 
 
-def run_tui() -> None:
+def run_tui(
+    backend_check: Callable[[], None] = check_backend_server_running,
+) -> None:
+    backend_check()
     AgentbahnTui().run()

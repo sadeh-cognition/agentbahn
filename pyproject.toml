@@ -16,6 +16,7 @@ dependencies = [
     "dspy>=3.1.3",
     "dspy-codex",
     "httpx",
+    "python-dotenv>=1.0.1",
     "textual>=8.2.4",
 ]
 
