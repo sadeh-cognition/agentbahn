@@ -77,9 +77,52 @@ def test_post_llm_config_persists_encrypted_api_key(db) -> None:
     assert decrypt_api_key(config.encrypted_api_key) == "secret-key"
 
 
+def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
+    baker.make(
+        LlmConfiguration,
+        pk=1,
+        provider="groq",
+        llm_name="llama-3.1-8b-instant",
+        encrypted_api_key=encrypt_api_key("secret-key"),
+    )
+
+    response = client.post(
+        "/api/llm-config",
+        json={
+            "provider": "openai",
+            "llm_name": "gpt-5.4",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "openai",
+        "llm_name": "gpt-5.4",
+        "api_key_configured": True,
+    }
+
+    config = LlmConfiguration.objects.get(pk=1)
+    assert config.provider == "openai"
+    assert config.llm_name == "gpt-5.4"
+    assert decrypt_api_key(config.encrypted_api_key) == "secret-key"
+
+
+def test_post_llm_config_requires_api_key_for_new_configuration(db) -> None:
+    response = client.post(
+        "/api/llm-config",
+        json={
+            "provider": "groq",
+            "llm_name": "llama-3.1-8b-instant",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "API key is required" in response.json()["detail"]
+
+
 def test_application_requires_llm_api_key_encryption_key() -> None:
     env = os.environ.copy()
-    env.pop("LLM_API_KEY_ENCRYPTION_KEY", None)
+    env["LLM_API_KEY_ENCRYPTION_KEY"] = ""
 
     result = subprocess.run(
         [

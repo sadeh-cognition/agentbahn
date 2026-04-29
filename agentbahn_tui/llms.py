@@ -41,6 +41,9 @@ def save_llm_config(
         transport=transport,
         timeout=5.0,
     ) as client:
-        response = client.post("/api/llm-config", json=payload.model_dump(mode="json"))
+        response = client.post(
+            "/api/llm-config",
+            json=payload.model_dump(mode="json", exclude_none=True),
+        )
         response.raise_for_status()
     return TypeAdapter(LlmConfigResponse).validate_python(response.json())

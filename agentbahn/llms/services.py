@@ -20,12 +20,15 @@ def serialize_llm_configuration(config: LlmConfiguration) -> LlmConfigResponse:
 
 
 def upsert_llm_configuration(payload: LlmConfigUpsertRequest) -> LlmConfiguration:
-    config, _created = LlmConfiguration.objects.update_or_create(
-        pk=LLM_CONFIGURATION_PRIMARY_KEY,
-        defaults={
-            "provider": payload.provider,
-            "llm_name": payload.llm_name,
-            "encrypted_api_key": payload.api_key,
-        },
-    )
+    config = get_llm_configuration()
+    if config is None:
+        if payload.api_key is None:
+            raise ValueError("API key is required when creating LLM configuration.")
+        config = LlmConfiguration(pk=LLM_CONFIGURATION_PRIMARY_KEY)
+
+    config.provider = payload.provider
+    config.llm_name = payload.llm_name
+    if payload.api_key is not None:
+        config.encrypted_api_key = payload.api_key
+    config.save()
     return config

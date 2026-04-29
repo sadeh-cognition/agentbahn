@@ -79,6 +79,37 @@ def test_save_llm_config_posts_schema_payload(settings) -> None:
     )
 
 
+def test_save_llm_config_omits_absent_api_key(settings) -> None:
+    settings.API_BASE_URL = "http://testserver"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/llm-config"
+        assert request.method == "POST"
+        assert request.content == b'{"provider":"openai","llm_name":"gpt-5.4"}'
+        return httpx.Response(
+            200,
+            json={
+                "provider": "openai",
+                "llm_name": "gpt-5.4",
+                "api_key_configured": True,
+            },
+        )
+
+    response = save_llm_config(
+        LlmConfigUpsertRequest(
+            provider="openai",
+            llm_name="gpt-5.4",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert response == LlmConfigResponse(
+        provider="openai",
+        llm_name="gpt-5.4",
+        api_key_configured=True,
+    )
+
+
 def test_check_backend_server_running_uses_health_endpoint(settings) -> None:
     settings.API_BASE_URL = "http://testserver"
 
@@ -182,20 +213,24 @@ def test_continue_llm_configuration_collects_and_saves_values() -> None:
     assert saved_step.secret_input is False
 
 
-def test_tui_llm_command_prompts_and_avoids_storing_api_key_in_history(
+def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_history(
     tmp_path,
 ) -> None:
     async def run_test() -> None:
         history_file = tmp_path / "command_history"
+        captured_payloads: list[LlmConfigUpsertRequest] = []
         app = AgentbahnTui(
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
             fetch_project_events_command=lambda _project_id: [],
             fetch_llm_config_command=lambda: LlmConfigLookupResponse(exists=False),
-            save_llm_config_command=lambda payload: LlmConfigResponse(
-                provider=payload.provider,
-                llm_name=payload.llm_name,
-                api_key_configured=bool(payload.api_key),
+            save_llm_config_command=lambda payload: (
+                captured_payloads.append(payload)
+                or LlmConfigResponse(
+                    provider=payload.provider,
+                    llm_name=payload.llm_name,
+                    api_key_configured=bool(payload.api_key),
+                )
             ),
             history_file=history_file,
         )
@@ -203,24 +238,80 @@ def test_tui_llm_command_prompts_and_avoids_storing_api_key_in_history(
         async with app.run_test() as pilot:
             await pilot.press("/", "l", "l", "m")
             await pilot.press("enter")
-            assert "Enter provider:" in str(app.query_one("#message-output").content)
+            assert app.query_one("#llm-config-form").display is True
 
             await pilot.press("g", "r", "o", "q")
-            await pilot.press("enter")
-            assert "Enter LLM name:" in str(app.query_one("#message-output").content)
+            await pilot.press("tab")
 
             await pilot.press("l", "l", "a", "m", "a")
-            await pilot.press("enter")
-            command_input = app.query_one("#command-input")
-            assert command_input.password is True
+            await pilot.press("tab")
 
             await pilot.press("s", "e", "c", "r", "e", "t")
             await pilot.press("enter")
-            assert command_input.password is False
+            assert captured_payloads == [
+                LlmConfigUpsertRequest(
+                    provider="groq",
+                    llm_name="llama",
+                    api_key="secret",
+                )
+            ]
             assert "Saved LLM configuration." in str(
-                app.query_one("#message-output").content
+                app.query_one("#llm-form-status").content
             )
 
         assert history_file.read_text(encoding="utf-8") == "/llm\n"
+
+    asyncio.run(run_test())
+
+
+def test_tui_llm_form_prefills_existing_config_and_can_save_without_api_key(
+    tmp_path,
+) -> None:
+    async def run_test() -> None:
+        captured_payloads: list[LlmConfigUpsertRequest] = []
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            fetch_llm_config_command=lambda: LlmConfigLookupResponse(
+                exists=True,
+                config=LlmConfigResponse(
+                    provider="groq",
+                    llm_name="llama-3.1-8b-instant",
+                    api_key_configured=True,
+                ),
+            ),
+            save_llm_config_command=lambda payload: (
+                captured_payloads.append(payload)
+                or LlmConfigResponse(
+                    provider=payload.provider,
+                    llm_name=payload.llm_name,
+                    api_key_configured=True,
+                )
+            ),
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "l", "l", "m")
+            await pilot.press("enter")
+            provider_input = app.query_one("#llm-provider-input")
+            llm_name_input = app.query_one("#llm-name-input")
+            api_key_input = app.query_one("#llm-api-key-input")
+
+            assert provider_input.value == "groq"
+            assert llm_name_input.value == "llama-3.1-8b-instant"
+            assert api_key_input.value == ""
+
+            provider_input.value = "openai"
+            llm_name_input.value = "gpt-5.4"
+            await pilot.click("#llm-save-button")
+
+        assert captured_payloads == [
+            LlmConfigUpsertRequest(
+                provider="openai",
+                llm_name="gpt-5.4",
+            )
+        ]
 
     asyncio.run(run_test())

@@ -10,10 +10,12 @@ from textual.app import App
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.containers import VerticalScroll
+from textual.widgets import Button
 from textual.widgets import DataTable
 from textual.widgets import Footer
 from textual.widgets import Header
 from textual.widgets import Input
+from textual.widgets import Label
 from textual.widgets import Static
 
 from agentbahn.llms.schemas import LlmConfigLookupResponse
@@ -25,9 +27,6 @@ from agentbahn.projects.schemas import TaskListResponse
 from agentbahn_tui.backend import check_backend_server_running
 from agentbahn_tui.command_results import CommandResult
 from agentbahn_tui.command_results import message_result
-from agentbahn_tui.llm_commands import LlmConfigurationPromptState
-from agentbahn_tui.llm_commands import continue_llm_configuration
-from agentbahn_tui.llm_commands import start_llm_command
 from agentbahn_tui.llms import fetch_llm_config
 from agentbahn_tui.llms import save_llm_config
 from agentbahn_tui.project_events import fetch_project_events
@@ -321,6 +320,19 @@ class AgentbahnTui(App[None]):
         height: auto;
     }
 
+    #llm-config-form {
+        display: none;
+        padding: 1 0;
+    }
+
+    #llm-config-form Input {
+        margin-bottom: 1;
+    }
+
+    #llm-form-status {
+        margin-top: 1;
+    }
+
     #command-input {
         dock: bottom;
         margin: 0 1 1 1;
@@ -354,7 +366,7 @@ class AgentbahnTui(App[None]):
             commands=load_command_history(self._history_file)
         )
         self._suppressed_history_change_events = 0
-        self._llm_prompt_state: LlmConfigurationPromptState | None = None
+        self._llm_form_has_existing_config = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -362,6 +374,19 @@ class AgentbahnTui(App[None]):
             with VerticalScroll(id="results-pane"):
                 yield Static(get_placeholder_message(), id="message-output")
                 yield DataTable(id="results-table")
+                with Vertical(id="llm-config-form"):
+                    yield Label("Provider")
+                    yield Input(id="llm-provider-input")
+                    yield Label("LLM name")
+                    yield Input(id="llm-name-input")
+                    yield Label("API key")
+                    yield Input(
+                        id="llm-api-key-input",
+                        password=True,
+                        placeholder="Leave blank to keep the existing key",
+                    )
+                    yield Button("Save LLM configuration", id="llm-save-button")
+                    yield Static("", id="llm-form-status")
             yield CommandInput(placeholder="/project list", id="command-input")
         yield Footer()
 
@@ -372,16 +397,20 @@ class AgentbahnTui(App[None]):
     def _show_message(self, message: str) -> None:
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
+        llm_form = self.query_one("#llm-config-form", Vertical)
         message_output.display = True
         message_output.update(message)
         results_table.display = False
+        llm_form.display = False
         results_table.clear(columns=True)
 
     def _show_projects(self, projects: ProjectListResponse) -> None:
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
+        llm_form = self.query_one("#llm-config-form", Vertical)
         message_output.display = False
         results_table.display = True
+        llm_form.display = False
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Name", "Description")
         for project in projects:
@@ -390,8 +419,10 @@ class AgentbahnTui(App[None]):
     def _show_tasks(self, tasks: TaskListResponse) -> None:
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
+        llm_form = self.query_one("#llm-config-form", Vertical)
         message_output.display = False
         results_table.display = True
+        llm_form.display = False
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Status", "Title", "Feature", "Assignee")
         for task in tasks:
@@ -406,8 +437,10 @@ class AgentbahnTui(App[None]):
     def _show_events(self, events: EventLogListResponse) -> None:
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
+        llm_form = self.query_one("#llm-config-form", Vertical)
         message_output.display = False
         results_table.display = True
+        llm_form.display = False
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Entity", "Entity ID", "Event Type", "Details")
         for event in events:
@@ -418,6 +451,73 @@ class AgentbahnTui(App[None]):
                 event.event_type,
                 format_event_details(event.event_details),
             )
+
+    def _show_llm_config_form(self) -> None:
+        lookup_response = self._fetch_llm_config_command()
+        config = lookup_response.config if lookup_response.exists else None
+
+        message_output = self.query_one("#message-output", Static)
+        results_table = self.query_one("#results-table", DataTable)
+        llm_form = self.query_one("#llm-config-form", Vertical)
+        provider_input = self.query_one("#llm-provider-input", Input)
+        llm_name_input = self.query_one("#llm-name-input", Input)
+        api_key_input = self.query_one("#llm-api-key-input", Input)
+        status = self.query_one("#llm-form-status", Static)
+
+        message_output.display = False
+        results_table.display = False
+        results_table.clear(columns=True)
+        llm_form.display = True
+        self._llm_form_has_existing_config = config is not None
+
+        provider_input.value = config.provider if config is not None else ""
+        llm_name_input.value = config.llm_name if config is not None else ""
+        api_key_input.value = ""
+        api_key_input.placeholder = (
+            "Leave blank to keep the existing key"
+            if config is not None and config.api_key_configured
+            else "Required"
+        )
+        status.update(
+            "Edit the LLM configuration."
+            if config is not None
+            else "Create the LLM configuration."
+        )
+        provider_input.focus()
+
+    def _save_llm_config_form(self) -> None:
+        provider_input = self.query_one("#llm-provider-input", Input)
+        llm_name_input = self.query_one("#llm-name-input", Input)
+        api_key_input = self.query_one("#llm-api-key-input", Input)
+        status = self.query_one("#llm-form-status", Static)
+
+        api_key = api_key_input.value.strip()
+        if not self._llm_form_has_existing_config and not api_key:
+            status.update("API key is required.")
+            api_key_input.focus()
+            return
+
+        try:
+            payload = LlmConfigUpsertRequest(
+                provider=provider_input.value,
+                llm_name=llm_name_input.value,
+                api_key=api_key or None,
+            )
+        except ValueError as exc:
+            status.update(str(exc))
+            return
+
+        saved_config = self._save_llm_config_command(payload)
+        self._llm_form_has_existing_config = True
+        api_key_input.value = ""
+        api_key_input.placeholder = "Leave blank to keep the existing key"
+        status.update(
+            "Saved LLM configuration.\n"
+            f"Provider: {saved_config.provider}\n"
+            f"LLM name: {saved_config.llm_name}\n"
+            "API key: "
+            f"{'configured' if saved_config.api_key_configured else 'missing'}"
+        )
 
     def _replace_command_input_value(self, value: str) -> None:
         command_input = self.query_one("#command-input", Input)
@@ -451,23 +551,23 @@ class AgentbahnTui(App[None]):
             self._command_history.index = None
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "command-input":
+            if event.input.id in {
+                "llm-provider-input",
+                "llm-name-input",
+                "llm-api-key-input",
+            }:
+                self._save_llm_config_form()
+            return
+
         normalized_value = event.value.strip()
-        if self._llm_prompt_state is not None:
-            transition = continue_llm_configuration(
-                self._llm_prompt_state,
-                event.value,
-                self._save_llm_config_command,
-            )
-            self._llm_prompt_state = transition.next_state
-            self._set_command_input_secret_mode(transition.secret_input)
-            result = transition.result
-        elif normalized_value == "/llm":
+        if normalized_value == "/llm":
             self._command_history.record(event.value)
             append_command_history(self._history_file, event.value)
-            transition = start_llm_command(self._fetch_llm_config_command)
-            self._llm_prompt_state = transition.next_state
-            self._set_command_input_secret_mode(transition.secret_input)
-            result = transition.result
+            self._set_command_input_secret_mode(False)
+            self._show_llm_config_form()
+            event.input.value = ""
+            return
         else:
             self._command_history.record(event.value)
             append_command_history(self._history_file, event.value)
@@ -488,6 +588,10 @@ class AgentbahnTui(App[None]):
             self._show_message(result.message or get_placeholder_message())
         event.input.value = ""
         event.input.focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "llm-save-button":
+            self._save_llm_config_form()
 
 
 def run_tui(

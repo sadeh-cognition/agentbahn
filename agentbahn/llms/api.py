@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ninja import Router
+from ninja.errors import HttpError
 
 from agentbahn.llms.schemas import LlmConfigLookupResponse
 from agentbahn.llms.schemas import LlmConfigResponse
@@ -27,5 +28,8 @@ def get_llm_config(request) -> LlmConfigLookupResponse:
 @router.post("/llm-config", response=LlmConfigResponse)
 def save_llm_config(request, payload: LlmConfigUpsertRequest) -> LlmConfigResponse:
     del request
-    config = upsert_llm_configuration(payload)
+    try:
+        config = upsert_llm_configuration(payload)
+    except ValueError as exc:
+        raise HttpError(422, str(exc)) from exc
     return serialize_llm_configuration(config)
