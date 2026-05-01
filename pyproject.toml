@@ -16,6 +16,10 @@ dependencies = [
     "dspy>=3.1.3",
     "dspy-codex",
     "httpx",
+    "loguru>=0.7.3",
+    "mlflow-skinny>=3.11.1",
+    "pandas>=3.0.2",
+    "pyright>=1.1.408",
     "python-dotenv>=1.0.1",
     "textual>=8.2.4",
 ]
@@ -25,8 +29,10 @@ agentbahn-tui = "agentbahn_tui.cli:main"
 
 [dependency-groups]
 dev = [
+    "django-extensions>=4.1",
     "django-stubs>=6.0.3",
     "model-bakery>=1.23.4",
+    "ptpython>=3.0.32",
     "pyright>=1.1.408",
     "pytest>=9.0.3",
     "pytest-django>=4.12.0",

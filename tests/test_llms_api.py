@@ -11,6 +11,7 @@ from agentbahn.api import api
 from agentbahn.llms.models import decrypt_api_key
 from agentbahn.llms.models import encrypt_api_key
 from agentbahn.llms.models import LlmConfiguration
+from agentbahn.llms.services import build_dspy_lm_from_configuration
 
 
 client = TestClient(api)
@@ -118,6 +119,32 @@ def test_post_llm_config_requires_api_key_for_new_configuration(db) -> None:
 
     assert response.status_code == 422
     assert "API key is required" in response.json()["detail"]
+
+
+def test_build_dspy_lm_from_configuration_uses_persisted_provider_model_and_key(
+    db,
+) -> None:
+    baker.make(
+        LlmConfiguration,
+        pk=1,
+        provider="groq",
+        llm_name="llama-3.1-8b-instant",
+        encrypted_api_key=encrypt_api_key("secret-key"),
+    )
+
+    lm = build_dspy_lm_from_configuration()
+
+    assert lm.model == "groq/llama-3.1-8b-instant"
+    assert lm.kwargs["api_key"] == "secret-key"
+
+
+def test_build_dspy_lm_from_configuration_requires_persisted_config(db) -> None:
+    try:
+        build_dspy_lm_from_configuration()
+    except ValueError as exc:
+        assert str(exc) == "No LLM configuration found."
+    else:
+        raise AssertionError("Expected missing LLM configuration to raise ValueError.")
 
 
 def test_application_requires_llm_api_key_encryption_key() -> None:

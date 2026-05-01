@@ -45,6 +45,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "agentbahn.llms.apps.LlmsConfig",
     "agentbahn_tui.apps.AgentbahnTuiConfig",
+    "agentbahn.codebase_agent",
+    "django_extensions",
 ]
 
 MIDDLEWARE = [
