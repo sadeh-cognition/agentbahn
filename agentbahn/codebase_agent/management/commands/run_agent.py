@@ -1,6 +1,6 @@
 import djclick as click
+from django.conf import settings
 from loguru import logger
-import dspy
 from agentbahn.codebase_agent.agent import DefaultAgent, AgentConfig
 from agentbahn.codebase_agent.environment import (
     LocalEnvironment,
@@ -19,7 +19,7 @@ from agentbahn.codebase_agent.environment import (
 @click.option(
     "--cost-limit",
     type=float,
-    default=3.0,
+    default=settings.CODEBASE_AGENT_COST_LIMIT,
     help="Stop agent after exceeding this cost.",
 )
 def command(task: str, step_limit: int, cost_limit: float):
@@ -34,7 +34,7 @@ def command(task: str, step_limit: int, cost_limit: float):
     agent = DefaultAgent(env=env, config=config)
 
     try:
-        prediction = agent.run(task)
+        prediction = agent.run(task, on_token=lambda token: click.echo(token, nl=False))
         result = getattr(prediction, "result", None)
         if result:
             click.secho(f"\nResult:\n{result}", fg="green")

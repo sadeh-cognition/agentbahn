@@ -1,16 +1,19 @@
 import json
 import traceback
+import asyncio
+from collections.abc import AsyncIterator, Callable
 from loguru import logger
 from pathlib import Path
 from typing import Any
 import platform
 
 import dspy
+from dspy.streaming import StreamListener
+from dspy.streaming import StreamResponse
 from pydantic import BaseModel
 
 from agentbahn.llms.services import build_dspy_lm_from_configuration
 from .environment import LocalEnvironment
-from .exceptions import InterruptAgentFlow
 from .utils import recursive_merge
 
 TRAJECTORY_FORMAT_VERSION = "agentbahn-dspy-1.0"
@@ -19,7 +22,7 @@ TRAJECTORY_FORMAT_VERSION = "agentbahn-dspy-1.0"
 class AgentConfig(BaseModel):
     step_limit: int = 10
     """Maximum number of steps the agent can take."""
-    cost_limit: float = 3.0
+    cost_limit: float
     """Stop agent after exceeding (!) this cost."""
 
 
@@ -242,18 +245,48 @@ class DefaultAgent:
             }
         )
 
-    def run(self, task: str):
+    def run(
+        self,
+        task: str,
+        *,
+        on_token: Callable[[str], None] | None = None,
+    ) -> dspy.Prediction:
         """Query the model and return model messages. Override to add hooks."""
+        return asyncio.run(self.arun(task, on_token=on_token))
+
+    async def arun(
+        self,
+        task: str,
+        *,
+        on_token: Callable[[str], None] | None = None,
+    ) -> dspy.Prediction:
+        """Run the agent and optionally handle streamed output tokens."""
+        final_prediction: dspy.Prediction | None = None
+        async for chunk in self.stream(task):
+            if isinstance(chunk, StreamResponse):
+                if on_token:
+                    on_token(chunk.chunk)
+            elif isinstance(chunk, dspy.Prediction):
+                final_prediction = chunk
+        if final_prediction is None:
+            raise RuntimeError("DSPy stream finished without returning a prediction.")
+        return final_prediction
+
+    async def stream(
+        self, task: str
+    ) -> AsyncIterator[StreamResponse | dspy.Prediction]:
+        """Stream ReAct thought tokens and yield the final prediction."""
         logger.info(f"Agent starting run with task: {task}")
         lm = self.lm or build_dspy_lm_from_configuration()
         with dspy.context(lm=lm):
-            prediction = self.agent(
+            stream_agent = self._build_streaming_agent()
+            output_stream = stream_agent(
                 task=task,
                 system_infrormation=platform.uname()._asdict(),
             )
+            async for chunk in output_stream:
+                yield chunk
         logger.info("Agent finished run.")
-        # message = self._prediction_to_message(prediction)
-        return prediction
 
     def _build_react_agent(self) -> dspy.ReAct:
         return dspy.ReAct(
@@ -261,6 +294,20 @@ class DefaultAgent:
             tools=[self.execute_action],
             max_iters=self.config.step_limit,
         )
+
+    def _build_streaming_agent(self) -> Callable[..., Any]:
+        return dspy.streamify(
+            self.agent,
+            stream_listeners=self._build_stream_listeners(),
+        )
+
+    def _build_stream_listeners(self) -> list[StreamListener]:
+        return [
+            StreamListener(
+                signature_field_name="next_thought",
+                allow_reuse=True,
+            )
+        ]
 
     def execute_action(self, action: str) -> dict[str, Any]:
         """Execute an action in the codebase environment and return the result."""

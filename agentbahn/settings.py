@@ -137,3 +137,17 @@ if not LLM_API_KEY_ENCRYPTION_KEY:
     raise ImproperlyConfigured(
         "LLM_API_KEY_ENCRYPTION_KEY environment variable must be set."
     )
+
+CODEBASE_AGENT_STEP_LIMIT = 10
+
+_CODEBASE_AGENT_COST_LIMIT = os.environ.get("CODEBASE_AGENT_COST_LIMIT")
+if not _CODEBASE_AGENT_COST_LIMIT:
+    raise ImproperlyConfigured(
+        "CODEBASE_AGENT_COST_LIMIT environment variable must be set."
+    )
+try:
+    CODEBASE_AGENT_COST_LIMIT = float(_CODEBASE_AGENT_COST_LIMIT)
+except ValueError as exc:
+    raise ImproperlyConfigured(
+        "CODEBASE_AGENT_COST_LIMIT environment variable must be a float."
+    ) from exc

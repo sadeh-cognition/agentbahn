@@ -21,7 +21,7 @@ TRAJECTORY_FORMAT_VERSION = "agentbahn-dspy-1.0"
 class AgentConfig(BaseModel):
     step_limit: int = 0
     """Maximum number of steps the agent can take."""
-    cost_limit: float = 3.0
+    cost_limit: float
     """Stop agent after exceeding (!) this cost."""
 
 
