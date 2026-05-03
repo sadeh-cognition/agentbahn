@@ -4,6 +4,7 @@ import dspy
 
 from agentbahn.llms.models import decrypt_api_key
 from agentbahn.llms.models import LlmConfiguration
+from agentbahn.llms.openai_lm import OpenAIFlexLM
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
 
@@ -14,13 +15,20 @@ def get_llm_configuration() -> LlmConfiguration | None:
     return LlmConfiguration.objects.filter(pk=LLM_CONFIGURATION_PRIMARY_KEY).first()
 
 
-def build_dspy_lm_from_configuration(config: LlmConfiguration | None = None) -> dspy.LM:
+def build_dspy_lm_from_configuration(
+    config: LlmConfiguration | None = None,
+) -> dspy.BaseLM:
     runtime_config = config or get_llm_configuration()
     if runtime_config is None:
         raise ValueError("No LLM configuration found.")
     api_key = decrypt_api_key(runtime_config.encrypted_api_key)
     if not api_key:
         raise ValueError("LLM API key is not configured.")
+    if runtime_config.provider == "openai":
+        return OpenAIFlexLM(
+            model=runtime_config.llm_name,
+            api_key=api_key,
+        )
     return dspy.LM(
         model=f"{runtime_config.provider}/{runtime_config.llm_name}",
         api_key=api_key,

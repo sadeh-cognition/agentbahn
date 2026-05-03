@@ -11,6 +11,7 @@ from agentbahn.api import api
 from agentbahn.llms.models import decrypt_api_key
 from agentbahn.llms.models import encrypt_api_key
 from agentbahn.llms.models import LlmConfiguration
+from agentbahn.llms.openai_lm import OpenAIFlexLM
 from agentbahn.llms.services import build_dspy_lm_from_configuration
 
 
@@ -136,6 +137,23 @@ def test_build_dspy_lm_from_configuration_uses_persisted_provider_model_and_key(
 
     assert lm.model == "groq/llama-3.1-8b-instant"
     assert lm.kwargs["api_key"] == "secret-key"
+
+
+def test_build_dspy_lm_from_configuration_uses_openai_flex_lm(db) -> None:
+    baker.make(
+        LlmConfiguration,
+        pk=1,
+        provider="openai",
+        llm_name="gpt-5.5",
+        encrypted_api_key=encrypt_api_key("secret-key"),
+    )
+
+    lm = build_dspy_lm_from_configuration()
+
+    assert isinstance(lm, OpenAIFlexLM)
+    assert lm.model == "gpt-5.5"
+    assert lm.api_key == "secret-key"
+    assert lm.service_tier == "flex"
 
 
 def test_build_dspy_lm_from_configuration_requires_persisted_config(db) -> None:
