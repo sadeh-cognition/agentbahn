@@ -3,10 +3,12 @@ from __future__ import annotations
 from ninja import Router
 from ninja.errors import HttpError
 
+from agentbahn.llms.schemas import LlmConfigListResponse
 from agentbahn.llms.schemas import LlmConfigLookupResponse
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
 from agentbahn.llms.services import get_llm_configuration
+from agentbahn.llms.services import list_llm_configurations
 from agentbahn.llms.services import serialize_llm_configuration
 from agentbahn.llms.services import upsert_llm_configuration
 
@@ -23,6 +25,12 @@ def get_llm_config(request) -> LlmConfigLookupResponse:
         exists=True,
         config=serialize_llm_configuration(config),
     )
+
+
+@router.get("/llm-configs", response=LlmConfigListResponse)
+def list_llm_configs(request) -> LlmConfigListResponse:
+    del request
+    return list_llm_configurations()
 
 
 @router.post("/llm-config", response=LlmConfigResponse)

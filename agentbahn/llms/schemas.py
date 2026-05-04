@@ -5,9 +5,15 @@ from pydantic import field_validator
 
 
 class LlmConfigResponse(Schema):
+    id: int = 0
     provider: str
     llm_name: str
+    lm_backend_path: str = "default"
     api_key_configured: bool
+
+
+class LlmConfigListResponse(Schema):
+    configs: list[LlmConfigResponse]
 
 
 class LlmConfigLookupResponse(Schema):
@@ -16,11 +22,13 @@ class LlmConfigLookupResponse(Schema):
 
 
 class LlmConfigUpsertRequest(Schema):
+    id: int | None = None
     provider: str
     llm_name: str
+    lm_backend_path: str = "default"
     api_key: str | None = None
 
-    @field_validator("provider", "llm_name")
+    @field_validator("provider", "llm_name", "lm_backend_path")
     @classmethod
     def validate_not_blank(cls, value: str) -> str:
         normalized_value = value.strip()

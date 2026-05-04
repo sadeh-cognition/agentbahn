@@ -4,6 +4,7 @@ import asyncio
 
 import httpx
 
+from agentbahn.llms.schemas import LlmConfigListResponse
 from agentbahn.llms.schemas import LlmConfigLookupResponse
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
@@ -12,6 +13,7 @@ from agentbahn_tui.backend import check_backend_server_running
 from agentbahn_tui.llm_commands import continue_llm_configuration
 from agentbahn_tui.llm_commands import start_llm_command
 from agentbahn_tui.llms import fetch_llm_config
+from agentbahn_tui.llms import fetch_llm_configs
 from agentbahn_tui.llms import save_llm_config
 from agentbahn_tui.tui import AgentbahnTui
 
@@ -42,6 +44,39 @@ def test_fetch_llm_config_uses_agentbahn_api_base_url(settings) -> None:
             llm_name="llama-3.1-8b-instant",
             api_key_configured=True,
         ),
+    )
+
+
+def test_fetch_llm_configs_uses_agentbahn_api_base_url(settings) -> None:
+    settings.API_BASE_URL = "http://testserver"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/llm-configs"
+        return httpx.Response(
+            200,
+            json={
+                "configs": [
+                    {
+                        "id": 1,
+                        "provider": "groq",
+                        "llm_name": "llama-3.1-8b-instant",
+                        "api_key_configured": True,
+                    }
+                ]
+            },
+        )
+
+    response = fetch_llm_configs(transport=httpx.MockTransport(handler))
+
+    assert response == LlmConfigListResponse(
+        configs=[
+            LlmConfigResponse(
+                id=1,
+                provider="groq",
+                llm_name="llama-3.1-8b-instant",
+                api_key_configured=True,
+            )
+        ]
     )
 
 
@@ -151,8 +186,10 @@ def test_start_llm_command_shows_existing_configuration() -> None:
     assert transition.secret_input is False
     assert transition.result.message == (
         "Current LLM configuration:\n"
+        "ID: 0\n"
         "Provider: groq\n"
         "LLM name: llama-3.1-8b-instant\n"
+        "LM backend path: default\n"
         "API key: configured"
     )
 
@@ -223,10 +260,11 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
             fetch_project_events_command=lambda _project_id: [],
-            fetch_llm_config_command=lambda: LlmConfigLookupResponse(exists=False),
+            fetch_llm_configs_command=lambda: LlmConfigListResponse(configs=[]),
             save_llm_config_command=lambda payload: (
                 captured_payloads.append(payload)
                 or LlmConfigResponse(
+                    id=1,
                     provider=payload.provider,
                     llm_name=payload.llm_name,
                     api_key_configured=bool(payload.api_key),
@@ -245,6 +283,7 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
 
             await pilot.press("l", "l", "a", "m", "a")
             await pilot.press("tab")
+            await pilot.press("tab")
 
             await pilot.press("s", "e", "c", "r", "e", "t")
             await pilot.press("enter")
@@ -255,7 +294,7 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
                     api_key="secret",
                 )
             ]
-            assert "Saved LLM configuration." in str(
+            assert "Created LLM configuration." in str(
                 app.query_one("#llm-form-status").content
             )
 
@@ -264,7 +303,7 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
     asyncio.run(run_test())
 
 
-def test_tui_llm_form_prefills_existing_config_and_can_save_without_api_key(
+def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
     tmp_path,
 ) -> None:
     async def run_test() -> None:
@@ -273,17 +312,20 @@ def test_tui_llm_form_prefills_existing_config_and_can_save_without_api_key(
             fetch_projects_command=lambda: [],
             fetch_tasks_command=lambda _project_id: [],
             fetch_project_events_command=lambda _project_id: [],
-            fetch_llm_config_command=lambda: LlmConfigLookupResponse(
-                exists=True,
-                config=LlmConfigResponse(
-                    provider="groq",
-                    llm_name="llama-3.1-8b-instant",
-                    api_key_configured=True,
-                ),
+            fetch_llm_configs_command=lambda: LlmConfigListResponse(
+                configs=[
+                    LlmConfigResponse(
+                        id=1,
+                        provider="groq",
+                        llm_name="llama-3.1-8b-instant",
+                        api_key_configured=True,
+                    )
+                ],
             ),
             save_llm_config_command=lambda payload: (
                 captured_payloads.append(payload)
                 or LlmConfigResponse(
+                    id=2,
                     provider=payload.provider,
                     llm_name=payload.llm_name,
                     api_key_configured=True,
@@ -297,20 +339,33 @@ def test_tui_llm_form_prefills_existing_config_and_can_save_without_api_key(
             await pilot.press("enter")
             provider_input = app.query_one("#llm-provider-input")
             llm_name_input = app.query_one("#llm-name-input")
+            lm_backend_path_input = app.query_one("#llm-backend-path-input")
+            lm_backend_path_tip = app.query_one("#llm-backend-path-tip")
             api_key_input = app.query_one("#llm-api-key-input")
+            llm_config_list = app.query_one("#llm-config-list")
 
-            assert provider_input.value == "groq"
-            assert llm_name_input.value == "llama-3.1-8b-instant"
+            assert provider_input.value == ""
+            assert llm_name_input.value == ""
+            assert lm_backend_path_input.value == "default"
+            assert "1. groq/llama-3.1-8b-instant" in str(llm_config_list.content)
+            assert "custom DSPy LM backend module" in str(lm_backend_path_tip.content)
+            assert "'default' uses DSPy's standard LM backend" in str(
+                lm_backend_path_tip.content
+            )
             assert api_key_input.value == ""
 
             provider_input.value = "openai"
             llm_name_input.value = "gpt-5.4"
-            await pilot.click("#llm-save-button")
+            lm_backend_path_input.value = "agentbahn.llms.custom_backend"
+            api_key_input.value = "new-secret"
+            await pilot.press("enter")
 
         assert captured_payloads == [
             LlmConfigUpsertRequest(
                 provider="openai",
                 llm_name="gpt-5.4",
+                lm_backend_path="agentbahn.llms.custom_backend",
+                api_key="new-secret",
             )
         ]
 

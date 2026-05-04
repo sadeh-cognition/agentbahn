@@ -32,8 +32,10 @@ def format_llm_configuration(config: LlmConfigResponse) -> str:
     api_key_status = "configured" if config.api_key_configured else "missing"
     return (
         "Current LLM configuration:\n"
+        f"ID: {config.id}\n"
         f"Provider: {config.provider}\n"
         f"LLM name: {config.llm_name}\n"
+        f"LM backend path: {config.lm_backend_path}\n"
         f"API key: {api_key_status}"
     )
 

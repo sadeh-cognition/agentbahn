@@ -33,18 +33,23 @@ def decrypt_api_key(value: str) -> str:
 class LlmConfiguration(models.Model):
     provider = models.CharField(max_length=255)
     llm_name = models.CharField(max_length=255)
+    lm_backend_path = models.CharField(max_length=255, default="default")
     encrypted_api_key = models.TextField()
     date_created = models.DateTimeField(auto_now_add=True)
     date_updated = models.DateTimeField(auto_now=True)
+    id: int
 
     def clean(self) -> None:
         self.provider = self.provider.strip()
         self.llm_name = self.llm_name.strip()
+        self.lm_backend_path = self.lm_backend_path.strip()
         self.encrypted_api_key = self.encrypted_api_key.strip()
         if not self.provider:
             raise ValidationError({"provider": "This field cannot be blank."})
         if not self.llm_name:
             raise ValidationError({"llm_name": "This field cannot be blank."})
+        if not self.lm_backend_path:
+            raise ValidationError({"lm_backend_path": "This field cannot be blank."})
         if not self.encrypted_api_key:
             raise ValidationError({"encrypted_api_key": "This field cannot be blank."})
 

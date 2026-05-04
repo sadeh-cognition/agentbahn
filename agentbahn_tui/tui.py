@@ -18,7 +18,7 @@ from textual.widgets import Input
 from textual.widgets import Label
 from textual.widgets import Static
 
-from agentbahn.llms.schemas import LlmConfigLookupResponse
+from agentbahn.llms.schemas import LlmConfigListResponse
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
 from agentbahn.projects.schemas import EventLogListResponse
@@ -27,7 +27,7 @@ from agentbahn.projects.schemas import TaskListResponse
 from agentbahn_tui.backend import check_backend_server_running
 from agentbahn_tui.command_results import CommandResult
 from agentbahn_tui.command_results import message_result
-from agentbahn_tui.llms import fetch_llm_config
+from agentbahn_tui.llms import fetch_llm_configs
 from agentbahn_tui.llms import save_llm_config
 from agentbahn_tui.project_events import fetch_project_events
 from agentbahn_tui.projects import fetch_projects
@@ -228,6 +228,19 @@ def format_event_details(event_details: dict[str, object]) -> str:
     return json.dumps(event_details, sort_keys=True)
 
 
+def _format_llm_config_list(configs: list[LlmConfigResponse]) -> str:
+    if not configs:
+        return "Existing LLM configurations: none"
+    lines = ["Existing LLM configurations:"]
+    for config in configs:
+        api_key_status = "configured" if config.api_key_configured else "missing"
+        lines.append(
+            f"{config.id}. {config.provider}/{config.llm_name} "
+            f"({config.lm_backend_path}, API key {api_key_status})"
+        )
+    return "\n".join(lines)
+
+
 def format_project_events_output(events: EventLogListResponse) -> CommandResult:
     if not events:
         return message_result("No events found.")
@@ -329,6 +342,11 @@ class AgentbahnTui(App[None]):
         margin-bottom: 1;
     }
 
+    #llm-backend-path-tip {
+        margin-bottom: 1;
+        color: $text-muted;
+    }
+
     #llm-form-status {
         margin-top: 1;
     }
@@ -347,9 +365,9 @@ class AgentbahnTui(App[None]):
         fetch_project_events_command: Callable[
             [int], EventLogListResponse
         ] = fetch_project_events,
-        fetch_llm_config_command: Callable[
-            [], LlmConfigLookupResponse
-        ] = fetch_llm_config,
+        fetch_llm_configs_command: Callable[
+            [], LlmConfigListResponse
+        ] = fetch_llm_configs,
         save_llm_config_command: Callable[
             [LlmConfigUpsertRequest], LlmConfigResponse
         ] = save_llm_config,
@@ -359,14 +377,13 @@ class AgentbahnTui(App[None]):
         self._fetch_projects_command = fetch_projects_command
         self._fetch_tasks_command = fetch_tasks_command
         self._fetch_project_events_command = fetch_project_events_command
-        self._fetch_llm_config_command = fetch_llm_config_command
+        self._fetch_llm_configs_command = fetch_llm_configs_command
         self._save_llm_config_command = save_llm_config_command
         self._history_file = history_file or find_command_history_file()
         self._command_history = CommandHistory(
             commands=load_command_history(self._history_file)
         )
         self._suppressed_history_change_events = 0
-        self._llm_form_has_existing_config = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -375,17 +392,26 @@ class AgentbahnTui(App[None]):
                 yield Static(get_placeholder_message(), id="message-output")
                 yield DataTable(id="results-table")
                 with Vertical(id="llm-config-form"):
+                    yield Static("", id="llm-config-list")
                     yield Label("Provider")
                     yield Input(id="llm-provider-input")
                     yield Label("LLM name")
                     yield Input(id="llm-name-input")
+                    yield Label("LM backend path")
+                    yield Input(id="llm-backend-path-input")
+                    yield Static(
+                        "Import path for a custom DSPy LM backend module. "
+                        "'default' uses DSPy's standard LM backend for the "
+                        "selected provider and model.",
+                        id="llm-backend-path-tip",
+                    )
                     yield Label("API key")
                     yield Input(
                         id="llm-api-key-input",
                         password=True,
-                        placeholder="Leave blank to keep the existing key",
+                        placeholder="Required",
                     )
-                    yield Button("Save LLM configuration", id="llm-save-button")
+                    yield Button("Create LLM configuration", id="llm-save-button")
                     yield Static("", id="llm-form-status")
             yield CommandInput(placeholder="/project list", id="command-input")
         yield Footer()
@@ -453,14 +479,15 @@ class AgentbahnTui(App[None]):
             )
 
     def _show_llm_config_form(self) -> None:
-        lookup_response = self._fetch_llm_config_command()
-        config = lookup_response.config if lookup_response.exists else None
+        configs = self._fetch_llm_configs_command().configs
 
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        llm_config_list = self.query_one("#llm-config-list", Static)
         provider_input = self.query_one("#llm-provider-input", Input)
         llm_name_input = self.query_one("#llm-name-input", Input)
+        lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
         api_key_input = self.query_one("#llm-api-key-input", Input)
         status = self.query_one("#llm-form-status", Static)
 
@@ -468,31 +495,25 @@ class AgentbahnTui(App[None]):
         results_table.display = False
         results_table.clear(columns=True)
         llm_form.display = True
-        self._llm_form_has_existing_config = config is not None
 
-        provider_input.value = config.provider if config is not None else ""
-        llm_name_input.value = config.llm_name if config is not None else ""
+        llm_config_list.update(_format_llm_config_list(configs))
+        provider_input.value = ""
+        llm_name_input.value = ""
+        lm_backend_path_input.value = "default"
         api_key_input.value = ""
-        api_key_input.placeholder = (
-            "Leave blank to keep the existing key"
-            if config is not None and config.api_key_configured
-            else "Required"
-        )
-        status.update(
-            "Edit the LLM configuration."
-            if config is not None
-            else "Create the LLM configuration."
-        )
+        api_key_input.placeholder = "Required"
+        status.update("Create a new LLM configuration.")
         provider_input.focus()
 
     def _save_llm_config_form(self) -> None:
         provider_input = self.query_one("#llm-provider-input", Input)
         llm_name_input = self.query_one("#llm-name-input", Input)
+        lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
         api_key_input = self.query_one("#llm-api-key-input", Input)
         status = self.query_one("#llm-form-status", Static)
 
         api_key = api_key_input.value.strip()
-        if not self._llm_form_has_existing_config and not api_key:
+        if not api_key:
             status.update("API key is required.")
             api_key_input.focus()
             return
@@ -501,6 +522,7 @@ class AgentbahnTui(App[None]):
             payload = LlmConfigUpsertRequest(
                 provider=provider_input.value,
                 llm_name=llm_name_input.value,
+                lm_backend_path=lm_backend_path_input.value,
                 api_key=api_key or None,
             )
         except ValueError as exc:
@@ -508,13 +530,19 @@ class AgentbahnTui(App[None]):
             return
 
         saved_config = self._save_llm_config_command(payload)
-        self._llm_form_has_existing_config = True
+        configs = self._fetch_llm_configs_command().configs
+        llm_config_list = self.query_one("#llm-config-list", Static)
         api_key_input.value = ""
-        api_key_input.placeholder = "Leave blank to keep the existing key"
+        provider_input.value = ""
+        llm_name_input.value = ""
+        lm_backend_path_input.value = "default"
+        llm_config_list.update(_format_llm_config_list(configs))
         status.update(
-            "Saved LLM configuration.\n"
+            "Created LLM configuration.\n"
+            f"ID: {saved_config.id}\n"
             f"Provider: {saved_config.provider}\n"
             f"LLM name: {saved_config.llm_name}\n"
+            f"LM backend path: {saved_config.lm_backend_path}\n"
             "API key: "
             f"{'configured' if saved_config.api_key_configured else 'missing'}"
         )
@@ -555,6 +583,7 @@ class AgentbahnTui(App[None]):
             if event.input.id in {
                 "llm-provider-input",
                 "llm-name-input",
+                "llm-backend-path-input",
                 "llm-api-key-input",
             }:
                 self._save_llm_config_form()

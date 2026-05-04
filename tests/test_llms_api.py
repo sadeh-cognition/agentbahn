@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import types
 
 from model_bakery import baker
 from ninja.testing import TestClient
@@ -11,7 +12,6 @@ from agentbahn.api import api
 from agentbahn.llms.models import decrypt_api_key
 from agentbahn.llms.models import encrypt_api_key
 from agentbahn.llms.models import LlmConfiguration
-from agentbahn.llms.openai_lm import OpenAIFlexLM
 from agentbahn.llms.services import build_dspy_lm_from_configuration
 
 
@@ -47,8 +47,10 @@ def test_get_llm_config_returns_existing_configuration(db) -> None:
     assert response.json() == {
         "exists": True,
         "config": {
+            "id": 1,
             "provider": "groq",
             "llm_name": "llama-3.1-8b-instant",
+            "lm_backend_path": "default",
             "api_key_configured": True,
         },
     }
@@ -60,20 +62,24 @@ def test_post_llm_config_persists_encrypted_api_key(db) -> None:
         json={
             "provider": "groq",
             "llm_name": "llama-3.1-8b-instant",
+            "lm_backend_path": "agentbahn.llms.custom_backend",
             "api_key": "secret-key",
         },
     )
 
     assert response.status_code == 200
     assert response.json() == {
+        "id": 1,
         "provider": "groq",
         "llm_name": "llama-3.1-8b-instant",
+        "lm_backend_path": "agentbahn.llms.custom_backend",
         "api_key_configured": True,
     }
 
     config = LlmConfiguration.objects.get(pk=1)
     assert config.provider == "groq"
     assert config.llm_name == "llama-3.1-8b-instant"
+    assert config.lm_backend_path == "agentbahn.llms.custom_backend"
     assert config.encrypted_api_key != "secret-key"
     assert config.encrypted_api_key.startswith("fernet:")
     assert decrypt_api_key(config.encrypted_api_key) == "secret-key"
@@ -91,6 +97,7 @@ def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
     response = client.post(
         "/api/llm-config",
         json={
+            "id": 1,
             "provider": "openai",
             "llm_name": "gpt-5.4",
         },
@@ -98,14 +105,17 @@ def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
+        "id": 1,
         "provider": "openai",
         "llm_name": "gpt-5.4",
+        "lm_backend_path": "default",
         "api_key_configured": True,
     }
 
     config = LlmConfiguration.objects.get(pk=1)
     assert config.provider == "openai"
     assert config.llm_name == "gpt-5.4"
+    assert config.lm_backend_path == "default"
     assert decrypt_api_key(config.encrypted_api_key) == "secret-key"
 
 
@@ -120,6 +130,46 @@ def test_post_llm_config_requires_api_key_for_new_configuration(db) -> None:
 
     assert response.status_code == 422
     assert "API key is required" in response.json()["detail"]
+
+
+def test_list_llm_configs_returns_existing_configurations(db) -> None:
+    baker.make(
+        LlmConfiguration,
+        pk=1,
+        provider="groq",
+        llm_name="llama-3.1-8b-instant",
+        encrypted_api_key=encrypt_api_key("secret-key"),
+    )
+    baker.make(
+        LlmConfiguration,
+        pk=2,
+        provider="openai",
+        llm_name="gpt-5.5",
+        lm_backend_path="agentbahn.llms.custom_backend",
+        encrypted_api_key=encrypt_api_key("other-key"),
+    )
+
+    response = client.get("/api/llm-configs")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configs": [
+            {
+                "id": 1,
+                "provider": "groq",
+                "llm_name": "llama-3.1-8b-instant",
+                "lm_backend_path": "default",
+                "api_key_configured": True,
+            },
+            {
+                "id": 2,
+                "provider": "openai",
+                "llm_name": "gpt-5.5",
+                "lm_backend_path": "agentbahn.llms.custom_backend",
+                "api_key_configured": True,
+            },
+        ]
+    }
 
 
 def test_build_dspy_lm_from_configuration_uses_persisted_provider_model_and_key(
@@ -139,21 +189,34 @@ def test_build_dspy_lm_from_configuration_uses_persisted_provider_model_and_key(
     assert lm.kwargs["api_key"] == "secret-key"
 
 
-def test_build_dspy_lm_from_configuration_uses_openai_flex_lm(db) -> None:
+def test_build_dspy_lm_from_configuration_uses_custom_backend_module(db) -> None:
+    module_name = "tests.dynamic_lm_backend"
+    backend_module = types.ModuleType(module_name)
+
+    class CustomLM:
+        def __init__(self, model: str, api_key: str) -> None:
+            self.model = model
+            self.api_key = api_key
+
+    setattr(backend_module, "LM", CustomLM)
+    sys.modules[module_name] = backend_module
     baker.make(
         LlmConfiguration,
         pk=1,
         provider="openai",
         llm_name="gpt-5.5",
+        lm_backend_path=module_name,
         encrypted_api_key=encrypt_api_key("secret-key"),
     )
 
-    lm = build_dspy_lm_from_configuration()
+    try:
+        lm = build_dspy_lm_from_configuration()
+    finally:
+        del sys.modules[module_name]
 
-    assert isinstance(lm, OpenAIFlexLM)
-    assert lm.model == "gpt-5.5"
+    assert isinstance(lm, CustomLM)
+    assert lm.model == "openai/gpt-5.5"
     assert lm.api_key == "secret-key"
-    assert lm.service_tier == "flex"
 
 
 def test_build_dspy_lm_from_configuration_requires_persisted_config(db) -> None:

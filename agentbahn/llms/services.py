@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+import importlib
+from typing import cast
+
 import dspy
 
 from agentbahn.llms.models import decrypt_api_key
 from agentbahn.llms.models import LlmConfiguration
-from agentbahn.llms.openai_lm import OpenAIFlexLM
+from agentbahn.llms.schemas import LlmConfigListResponse
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
 
-LLM_CONFIGURATION_PRIMARY_KEY = 1
-
 
 def get_llm_configuration() -> LlmConfiguration | None:
-    return LlmConfiguration.objects.filter(pk=LLM_CONFIGURATION_PRIMARY_KEY).first()
+    return LlmConfiguration.objects.order_by("id").first()
+
+
+def list_llm_configurations() -> LlmConfigListResponse:
+    return LlmConfigListResponse(
+        configs=[
+            serialize_llm_configuration(config)
+            for config in LlmConfiguration.objects.order_by("id")
+        ]
+    )
 
 
 def build_dspy_lm_from_configuration(
@@ -24,12 +34,11 @@ def build_dspy_lm_from_configuration(
     api_key = decrypt_api_key(runtime_config.encrypted_api_key)
     if not api_key:
         raise ValueError("LLM API key is not configured.")
-    if runtime_config.provider == "openai":
-        return OpenAIFlexLM(
-            model=runtime_config.llm_name,
-            api_key=api_key,
-        )
-    return dspy.LM(
+    lm_class = dspy.LM
+    if runtime_config.lm_backend_path != "default":
+        lm_backend_module = importlib.import_module(runtime_config.lm_backend_path)
+        lm_class = cast(type[dspy.BaseLM], getattr(lm_backend_module, "LM"))
+    return lm_class(
         model=f"{runtime_config.provider}/{runtime_config.llm_name}",
         api_key=api_key,
     )
@@ -37,21 +46,28 @@ def build_dspy_lm_from_configuration(
 
 def serialize_llm_configuration(config: LlmConfiguration) -> LlmConfigResponse:
     return LlmConfigResponse(
+        id=config.id,
         provider=config.provider,
         llm_name=config.llm_name,
+        lm_backend_path=config.lm_backend_path,
         api_key_configured=bool(config.encrypted_api_key),
     )
 
 
 def upsert_llm_configuration(payload: LlmConfigUpsertRequest) -> LlmConfiguration:
-    config = get_llm_configuration()
+    config = (
+        LlmConfiguration.objects.filter(pk=payload.id).first()
+        if payload.id is not None
+        else None
+    )
     if config is None:
         if payload.api_key is None:
             raise ValueError("API key is required when creating LLM configuration.")
-        config = LlmConfiguration(pk=LLM_CONFIGURATION_PRIMARY_KEY)
+        config = LlmConfiguration()
 
     config.provider = payload.provider
     config.llm_name = payload.llm_name
+    config.lm_backend_path = payload.lm_backend_path
     if payload.api_key is not None:
         config.encrypted_api_key = payload.api_key
     config.save()
