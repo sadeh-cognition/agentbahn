@@ -40,7 +40,7 @@ class OpenAIFlexLM(dspy.BaseLM):
         **kwargs: Any,
     ) -> Any:
         request_kwargs = self._build_request_kwargs(prompt, messages, kwargs)
-        return self.client.with_options(timeout=self.timeout).chat.completions.create(
+        return self.client.with_options(timeout=self.timeout).responses.create(
             **request_kwargs
         )
 
@@ -53,7 +53,7 @@ class OpenAIFlexLM(dspy.BaseLM):
         request_kwargs = self._build_request_kwargs(prompt, messages, kwargs)
         return await self.async_client.with_options(
             timeout=self.timeout
-        ).chat.completions.create(**request_kwargs)
+        ).responses.create(**request_kwargs)
 
     def _build_request_kwargs(
         self,
@@ -61,14 +61,15 @@ class OpenAIFlexLM(dspy.BaseLM):
         messages: list[dict[str, Any]] | None,
         kwargs: dict[str, Any],
     ) -> dict[str, Any]:
-        request_messages = messages or [{"role": "user", "content": prompt}]
         request_kwargs = {
             **self.kwargs,
             **kwargs,
             "model": self.model,
-            "messages": request_messages,
+            "input": messages or prompt,
             "service_tier": self.service_tier,
         }
+        if "max_tokens" in request_kwargs:
+            request_kwargs["max_output_tokens"] = request_kwargs.pop("max_tokens")
         if request_kwargs.get("rollout_id") is None:
             request_kwargs.pop("rollout_id", None)
         return request_kwargs
