@@ -128,7 +128,10 @@ def test_save_llm_config_omits_absent_api_key(settings) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/llm-config"
         assert request.method == "POST"
-        assert request.content == b'{"name":"OpenAI main","provider":"openai","llm_name":"gpt-5.4"}'
+        assert (
+            request.content
+            == b'{"name":"OpenAI main","provider":"openai","llm_name":"gpt-5.4"}'
+        )
         return httpx.Response(
             200,
             json={
@@ -530,12 +533,19 @@ def test_tui_model_command_selects_config_for_agent_chat(tmp_path) -> None:
             await pilot.press("/", "m", "o", "d", "e", "l")
             await pilot.press("enter")
             model_select = app.query_one("#model-config-select")
+            model_table = app.query_one("#model-config-table")
+            assert model_table.row_count == 2
+            assert model_table.get_row_at(0)[0] == ""
+            assert model_table.get_row_at(1)[0] == ""
             model_select.value = "2"
             await pilot.pause()
+            assert model_table.get_row_at(1)[0] == ""
             await pilot.click("#model-use-button")
             assert "Selected model for codebase-agent chat" in str(
                 app.query_one("#model-status").content
             )
+            assert model_table.get_row_at(0)[0] == ""
+            assert model_table.get_row_at(1)[0] == "✓"
 
             command_input = app.query_one("#command-input")
             command_input.focus()

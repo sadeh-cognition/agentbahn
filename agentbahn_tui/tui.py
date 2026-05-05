@@ -428,6 +428,11 @@ class AgentbahnTui(App[None]):
         margin-bottom: 1;
     }
 
+    #model-config-table {
+        height: auto;
+        margin-bottom: 1;
+    }
+
     #model-status {
         margin-top: 1;
     }
@@ -538,7 +543,7 @@ class AgentbahnTui(App[None]):
                         allow_blank=True,
                         disabled=True,
                     )
-                    yield Static("", id="model-config-list")
+                    yield DataTable(id="model-config-table")
                     yield Button(
                         "Use selected model",
                         id="model-use-button",
@@ -721,7 +726,7 @@ class AgentbahnTui(App[None]):
         llm_form = self.query_one("#llm-config-form", Vertical)
         model_form = self.query_one("#model-select-form", Vertical)
         model_config_select = self.query_one("#model-config-select", Select)
-        model_config_list = self.query_one("#model-config-list", Static)
+        model_config_table = self.query_one("#model-config-table", DataTable)
         status = self.query_one("#model-status", Static)
 
         message_output.display = False
@@ -733,7 +738,8 @@ class AgentbahnTui(App[None]):
 
         if not configs:
             model_config_select.set_options([])
-            model_config_list.update("Existing LLM configurations: none")
+            model_config_table.clear(columns=True)
+            model_config_table.add_columns("Selected", "ID", "Name", "Provider", "LLM")
             status.update("No LLM configurations found. Use /llm to create one.")
             self._set_model_form_controls_disabled(True)
             return
@@ -750,10 +756,30 @@ class AgentbahnTui(App[None]):
             configs[0],
         )
         model_config_select.value = str(selected_config.id)
-        model_config_list.update(_format_llm_config_list(configs))
-        status.update(_format_model_selection(selected_config))
+        self._refresh_model_config_table(self._selected_model_config_id)
+        status.update(
+            _format_model_selection(
+                selected_config
+                if self._selected_model_config_id == selected_config.id
+                else None
+            )
+        )
         self._set_model_form_controls_disabled(False)
         model_config_select.focus()
+
+    def _refresh_model_config_table(self, selected_config_id: int | None) -> None:
+        model_config_table = self.query_one("#model-config-table", DataTable)
+        model_config_table.clear(columns=True)
+        model_config_table.add_columns("Selected", "ID", "Name", "Provider", "LLM")
+        for config in self._llm_configs:
+            selected_marker = "✓" if config.id == selected_config_id else ""
+            model_config_table.add_row(
+                selected_marker,
+                str(config.id),
+                config.name,
+                config.provider,
+                config.llm_name,
+            )
 
     def _select_model_config(self) -> None:
         model_config_select = self.query_one("#model-config-select", Select)
@@ -772,6 +798,7 @@ class AgentbahnTui(App[None]):
             return
 
         self._selected_model_config_id = selected_config.id
+        self._refresh_model_config_table(selected_config.id)
         status.update(_format_model_selection(selected_config))
 
     def _select_llm_config(self, config_id: int | None) -> None:
