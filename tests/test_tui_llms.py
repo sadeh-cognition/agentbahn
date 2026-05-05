@@ -370,3 +370,73 @@ def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
         ]
 
     asyncio.run(run_test())
+
+
+def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
+    async def run_test() -> None:
+        captured_payloads: list[LlmConfigUpsertRequest] = []
+        saved_response = LlmConfigResponse(
+            id=1,
+            provider="openai",
+            llm_name="gpt-5.4",
+            lm_backend_path="agentbahn.llms.custom_backend",
+            api_key_configured=True,
+        )
+        configs = [
+            LlmConfigResponse(
+                id=1,
+                provider="groq",
+                llm_name="llama-3.1-8b-instant",
+                api_key_configured=True,
+            )
+        ]
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            fetch_llm_configs_command=lambda: LlmConfigListResponse(configs=configs),
+            save_llm_config_command=lambda payload: (
+                captured_payloads.append(payload) or saved_response
+            ),
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "l", "l", "m")
+            await pilot.press("enter")
+            llm_config_select = app.query_one("#llm-config-select")
+            provider_input = app.query_one("#llm-provider-input")
+            llm_name_input = app.query_one("#llm-name-input")
+            lm_backend_path_input = app.query_one("#llm-backend-path-input")
+            api_key_input = app.query_one("#llm-api-key-input")
+            save_button = app.query_one("#llm-save-button")
+
+            llm_config_select.value = "1"
+            await pilot.pause()
+
+            assert provider_input.value == "groq"
+            assert llm_name_input.value == "llama-3.1-8b-instant"
+            assert lm_backend_path_input.value == "default"
+            assert api_key_input.value == ""
+            assert api_key_input.placeholder == "Leave blank to keep configured key"
+            assert str(save_button.label) == "Update LLM configuration"
+
+            provider_input.value = "openai"
+            llm_name_input.value = "gpt-5.4"
+            lm_backend_path_input.value = "agentbahn.llms.custom_backend"
+            api_key_input.value = ""
+            await pilot.press("enter")
+
+            assert captured_payloads == [
+                LlmConfigUpsertRequest(
+                    id=1,
+                    provider="openai",
+                    llm_name="gpt-5.4",
+                    lm_backend_path="agentbahn.llms.custom_backend",
+                )
+            ]
+            assert "Updated LLM configuration." in str(
+                app.query_one("#llm-form-status").content
+            )
+
+    asyncio.run(run_test())

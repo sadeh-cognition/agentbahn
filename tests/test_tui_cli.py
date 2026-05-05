@@ -8,6 +8,7 @@ from agentbahn.projects.schemas import EventLogResponse
 from agentbahn.projects.schemas import FeatureResponse
 from django.core.management import call_command
 
+from agentbahn.codebase_agent.schemas import CodebaseAgentStreamEvent
 from agentbahn_tui.project_events import FEATURE_EVENT_ENTITY_TYPE
 from agentbahn_tui.project_events import PROJECT_EVENT_ENTITY_TYPE
 from agentbahn_tui.project_events import TASK_EVENT_ENTITY_TYPE
@@ -38,7 +39,8 @@ def test_placeholder_message_is_stable() -> None:
         "task    | /task list          | /tl      | PROJECT_ID | List tasks for a project.\n"
         "llm     | /llm                | -        | -          | Show or configure the LLM used by agentbahn.\n"
         "\n"
-        "Type a command below and press Enter."
+        "Messages that do not start with / are sent to the DefaultAgent.\n"
+        "Type a command or message below and press Enter."
     )
 
 
@@ -433,3 +435,87 @@ def test_tui_command_history_persists_across_sessions(tmp_path) -> None:
     asyncio.run(first_session(history_file))
     assert history_file.read_text(encoding="utf-8") == "/project list\n/task list 7\n"
     asyncio.run(second_session(history_file))
+
+
+def test_tui_non_command_message_streams_to_agent(tmp_path) -> None:
+    queries: list[str] = []
+
+    def stream_agent_command(query: str):
+        queries.append(query)
+        yield CodebaseAgentStreamEvent(type="token", content="Agent ")
+        yield CodebaseAgentStreamEvent(type="result", content="done")
+
+    async def run_test() -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            stream_agent_command=stream_agent_command,
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("B", "u", "i", "l", "d", " ", "i", "t")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert queries == ["Build it"]
+            message_output = app.query_one("#message-output")
+            assert str(message_output.render()) == "Agent \ndone"
+
+    asyncio.run(run_test())
+
+
+def test_tui_agent_slash_message_shows_error(tmp_path) -> None:
+    queries: list[str] = []
+
+    def stream_agent_command(query: str):
+        queries.append(query)
+        yield CodebaseAgentStreamEvent(type="result", content="Done")
+
+    async def run_test() -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            stream_agent_command=stream_agent_command,
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press(
+                "/", "a", "g", "e", "n", "t", " ", "B", "u", "i", "l", "d"
+            )
+            await pilot.press("enter")
+            await pilot.pause()
+            assert queries == []
+            message_output = app.query_one("#message-output")
+            assert str(message_output.render()) == "Unknown command: /agent Build"
+
+    asyncio.run(run_test())
+
+
+def test_tui_unknown_slash_message_shows_error(tmp_path) -> None:
+    queries: list[str] = []
+
+    def stream_agent_command(query: str):
+        queries.append(query)
+        yield CodebaseAgentStreamEvent(type="result", content="Done")
+
+    async def run_test() -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            stream_agent_command=stream_agent_command,
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "u", "n", "k", "n", "o", "w", "n")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert queries == []
+            message_output = app.query_one("#message-output")
+            assert str(message_output.render()) == "Unknown command: /unknown"
+
+    asyncio.run(run_test())

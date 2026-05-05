@@ -38,17 +38,12 @@ class PlainCodebaseAgentSignature(dspy.Signature):
 
 if platform.system() == "Darwin":
     CodebaseAgentSignature = PlainCodebaseAgentSignature.with_instructions("""You are a helpful assistant that can interact with a computer.
-
 You can run exactly ONE bash code block with ONE command (or commands connected with && or ||) using the `execute_action` tool.
-
 Failure to follow these rules will cause your actions to be rejected.
-
 You can execute bash commands and edit files to implement the necessary changes.
 
 ## Recommended Workflow
-
 This workflow should be done step-by-step so that you can iterate on your changes and any possible problems.
-
 1. Analyze the codebase by finding and reading relevant files
 2. Create a script to reproduce the issue
 3. Edit the source code to resolve the issue
@@ -66,11 +61,9 @@ However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working
 Here is an example of a correct action:
 
 <example_action>
-
 action to execute:
 ```
 ls -la
-```
 </example_response>
 
 ## Useful command examples
@@ -121,11 +114,8 @@ Use the available `execute_action` tool to complete the user request.
 """)
 else:
     CodebaseAgentSignature = PlainCodebaseAgentSignature.with_instructions("""You are a helpful assistant that can interact with a computer.
-
 You can run exactly ONE bash code block with ONE command (or commands connected with && or ||) using the `execute_action` tool.
-
 Failure to follow these rules will cause your actions to be rejected.
-
 You can execute bash commands and edit files to implement the necessary changes.
 
 ## Recommended Workflow

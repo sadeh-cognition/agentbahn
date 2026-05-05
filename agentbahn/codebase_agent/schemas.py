@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from ninja import Schema
 from pydantic import field_validator
 
@@ -18,3 +20,9 @@ class CodebaseAgentRequest(Schema):
 
 class CodebaseAgentResponse(Schema):
     result: str
+
+
+class CodebaseAgentStreamEvent(Schema):
+    type: Literal["token", "result", "error"]
+    content: str | None = None
+    detail: str | None = None

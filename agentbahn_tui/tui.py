@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,14 +17,17 @@ from textual.widgets import Footer
 from textual.widgets import Header
 from textual.widgets import Input
 from textual.widgets import Label
+from textual.widgets import Select
 from textual.widgets import Static
 
+from agentbahn.codebase_agent.schemas import CodebaseAgentStreamEvent
 from agentbahn.llms.schemas import LlmConfigListResponse
 from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn.llms.schemas import LlmConfigUpsertRequest
 from agentbahn.projects.schemas import EventLogListResponse
 from agentbahn.projects.schemas import ProjectListResponse
 from agentbahn.projects.schemas import TaskListResponse
+from agentbahn_tui.agents import stream_codebase_agent
 from agentbahn_tui.backend import check_backend_server_running
 from agentbahn_tui.command_results import CommandResult
 from agentbahn_tui.command_results import message_result
@@ -72,6 +76,17 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
         arguments="-",
         description="Show or configure the LLM used by agentbahn.",
     ),
+)
+
+SLASH_COMMAND_WORDS: frozenset[str] = frozenset(
+    {
+        "/llm",
+        "/pel",
+        "/pl",
+        "/project",
+        "/task",
+        "/tl",
+    }
 )
 
 
@@ -125,7 +140,8 @@ def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
     rows.extend(
         [
             "",
-            "Type a command below and press Enter.",
+            "Messages that do not start with / are sent to the DefaultAgent.",
+            "Type a command or message below and press Enter.",
         ]
     )
     return "\n".join(rows)
@@ -133,6 +149,13 @@ def _build_help_table(entries: tuple[CommandHelpEntry, ...]) -> str:
 
 def get_placeholder_message() -> str:
     return _build_help_table(COMMAND_HELP_ENTRIES)
+
+
+def is_registered_slash_command(command: str) -> bool:
+    command_parts = command.strip().split(maxsplit=1)
+    if not command_parts:
+        return False
+    return command_parts[0] in SLASH_COMMAND_WORDS
 
 
 def find_agentbahn_home() -> Path:
@@ -241,6 +264,14 @@ def _format_llm_config_list(configs: list[LlmConfigResponse]) -> str:
     return "\n".join(lines)
 
 
+def _format_llm_config_option(config: LlmConfigResponse) -> str:
+    api_key_status = "configured" if config.api_key_configured else "missing"
+    return (
+        f"{config.id}. {config.provider}/{config.llm_name} "
+        f"({config.lm_backend_path}, API key {api_key_status})"
+    )
+
+
 def format_project_events_output(events: EventLogListResponse) -> CommandResult:
     if not events:
         return message_result("No events found.")
@@ -342,6 +373,10 @@ class AgentbahnTui(App[None]):
         margin-bottom: 1;
     }
 
+    #llm-config-form Select {
+        margin-bottom: 1;
+    }
+
     #llm-backend-path-tip {
         margin-bottom: 1;
         color: $text-muted;
@@ -371,6 +406,9 @@ class AgentbahnTui(App[None]):
         save_llm_config_command: Callable[
             [LlmConfigUpsertRequest], LlmConfigResponse
         ] = save_llm_config,
+        stream_agent_command: Callable[
+            [str], Iterator[CodebaseAgentStreamEvent]
+        ] = stream_codebase_agent,
         history_file: Path | None = None,
     ) -> None:
         super().__init__()
@@ -379,11 +417,24 @@ class AgentbahnTui(App[None]):
         self._fetch_project_events_command = fetch_project_events_command
         self._fetch_llm_configs_command = fetch_llm_configs_command
         self._save_llm_config_command = save_llm_config_command
+        self._stream_agent_command = stream_agent_command
         self._history_file = history_file or find_command_history_file()
         self._command_history = CommandHistory(
             commands=load_command_history(self._history_file)
         )
         self._suppressed_history_change_events = 0
+        self._agent_output = ""
+        self._llm_configs: list[LlmConfigResponse] = []
+        self._selected_llm_config_id: int | None = None
+        self._suppress_llm_select_change = False
+
+    def _set_llm_form_controls_disabled(self, disabled: bool) -> None:
+        self.query_one("#llm-config-select", Select).disabled = disabled
+        self.query_one("#llm-provider-input", Input).disabled = disabled
+        self.query_one("#llm-name-input", Input).disabled = disabled
+        self.query_one("#llm-backend-path-input", Input).disabled = disabled
+        self.query_one("#llm-api-key-input", Input).disabled = disabled
+        self.query_one("#llm-save-button", Button).disabled = disabled
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -392,13 +443,20 @@ class AgentbahnTui(App[None]):
                 yield Static(get_placeholder_message(), id="message-output")
                 yield DataTable(id="results-table")
                 with Vertical(id="llm-config-form"):
+                    yield Label("Configuration")
+                    yield Select(
+                        [("Create new configuration", "new")],
+                        id="llm-config-select",
+                        allow_blank=False,
+                        disabled=True,
+                    )
                     yield Static("", id="llm-config-list")
                     yield Label("Provider")
-                    yield Input(id="llm-provider-input")
+                    yield Input(id="llm-provider-input", disabled=True)
                     yield Label("LLM name")
-                    yield Input(id="llm-name-input")
+                    yield Input(id="llm-name-input", disabled=True)
                     yield Label("LM backend path")
-                    yield Input(id="llm-backend-path-input")
+                    yield Input(id="llm-backend-path-input", disabled=True)
                     yield Static(
                         "Import path for a custom DSPy LM backend module. "
                         "'default' uses DSPy's standard LM backend for the "
@@ -410,8 +468,13 @@ class AgentbahnTui(App[None]):
                         id="llm-api-key-input",
                         password=True,
                         placeholder="Required",
+                        disabled=True,
                     )
-                    yield Button("Create LLM configuration", id="llm-save-button")
+                    yield Button(
+                        "Create LLM configuration",
+                        id="llm-save-button",
+                        disabled=True,
+                    )
                     yield Static("", id="llm-form-status")
             yield CommandInput(placeholder="/project list", id="command-input")
         yield Footer()
@@ -428,7 +491,43 @@ class AgentbahnTui(App[None]):
         message_output.update(message)
         results_table.display = False
         llm_form.display = False
+        self._set_llm_form_controls_disabled(True)
         results_table.clear(columns=True)
+
+    def _start_agent_stream(self, query: str) -> None:
+        self._agent_output = ""
+        self._show_message("DefaultAgent is running...\n")
+        self.run_worker(
+            lambda: self._run_agent_stream(query),
+            thread=True,
+            exclusive=True,
+            group="agent",
+        )
+
+    def _run_agent_stream(self, query: str) -> None:
+        try:
+            for event in self._stream_agent_command(query):
+                self.call_from_thread(self._apply_agent_stream_event, event)
+        except Exception as exc:
+            self.call_from_thread(
+                self._append_agent_output,
+                f"\nAgent request failed: {exc}",
+            )
+
+    def _apply_agent_stream_event(self, event: CodebaseAgentStreamEvent) -> None:
+        if event.type == "token" and event.content:
+            self._append_agent_output(event.content)
+        elif event.type == "result" and event.content:
+            if self._agent_output and not self._agent_output.endswith("\n"):
+                self._append_agent_output("\n")
+            self._append_agent_output(event.content)
+        elif event.type == "error":
+            detail = event.detail or "Agent request failed."
+            self._append_agent_output(f"\n{detail}")
+
+    def _append_agent_output(self, content: str) -> None:
+        self._agent_output += content
+        self._show_message(self._agent_output)
 
     def _show_projects(self, projects: ProjectListResponse) -> None:
         message_output = self.query_one("#message-output", Static)
@@ -437,6 +536,7 @@ class AgentbahnTui(App[None]):
         message_output.display = False
         results_table.display = True
         llm_form.display = False
+        self._set_llm_form_controls_disabled(True)
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Name", "Description")
         for project in projects:
@@ -449,6 +549,7 @@ class AgentbahnTui(App[None]):
         message_output.display = False
         results_table.display = True
         llm_form.display = False
+        self._set_llm_form_controls_disabled(True)
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Status", "Title", "Feature", "Assignee")
         for task in tasks:
@@ -467,6 +568,7 @@ class AgentbahnTui(App[None]):
         message_output.display = False
         results_table.display = True
         llm_form.display = False
+        self._set_llm_form_controls_disabled(True)
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Entity", "Entity ID", "Event Type", "Details")
         for event in events:
@@ -480,29 +582,86 @@ class AgentbahnTui(App[None]):
 
     def _show_llm_config_form(self) -> None:
         configs = self._fetch_llm_configs_command().configs
+        self._llm_configs = configs
+        self._selected_llm_config_id = None
 
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        llm_config_select = self.query_one("#llm-config-select", Select)
         llm_config_list = self.query_one("#llm-config-list", Static)
         provider_input = self.query_one("#llm-provider-input", Input)
         llm_name_input = self.query_one("#llm-name-input", Input)
         lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
         api_key_input = self.query_one("#llm-api-key-input", Input)
+        save_button = self.query_one("#llm-save-button", Button)
         status = self.query_one("#llm-form-status", Static)
 
         message_output.display = False
         results_table.display = False
         results_table.clear(columns=True)
         llm_form.display = True
+        self._set_llm_form_controls_disabled(False)
 
+        llm_config_select.set_options(
+            [
+                ("Create new configuration", "new"),
+                *[
+                    (_format_llm_config_option(config), str(config.id))
+                    for config in configs
+                ],
+            ]
+        )
+        llm_config_select.value = "new"
         llm_config_list.update(_format_llm_config_list(configs))
         provider_input.value = ""
         llm_name_input.value = ""
         lm_backend_path_input.value = "default"
         api_key_input.value = ""
         api_key_input.placeholder = "Required"
+        save_button.label = "Create LLM configuration"
         status.update("Create a new LLM configuration.")
+        provider_input.focus()
+
+    def _select_llm_config(self, config_id: int | None) -> None:
+        self._selected_llm_config_id = config_id
+        provider_input = self.query_one("#llm-provider-input", Input)
+        llm_name_input = self.query_one("#llm-name-input", Input)
+        lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
+        api_key_input = self.query_one("#llm-api-key-input", Input)
+        save_button = self.query_one("#llm-save-button", Button)
+        status = self.query_one("#llm-form-status", Static)
+
+        if config_id is None:
+            provider_input.value = ""
+            llm_name_input.value = ""
+            lm_backend_path_input.value = "default"
+            api_key_input.value = ""
+            api_key_input.placeholder = "Required"
+            save_button.label = "Create LLM configuration"
+            status.update("Create a new LLM configuration.")
+            provider_input.focus()
+            return
+
+        selected_config = next(
+            (config for config in self._llm_configs if config.id == config_id),
+            None,
+        )
+        if selected_config is None:
+            status.update(f"LLM configuration {config_id} was not found.")
+            return
+
+        provider_input.value = selected_config.provider
+        llm_name_input.value = selected_config.llm_name
+        lm_backend_path_input.value = selected_config.lm_backend_path
+        api_key_input.value = ""
+        api_key_input.placeholder = (
+            "Leave blank to keep configured key"
+            if selected_config.api_key_configured
+            else "Required"
+        )
+        save_button.label = "Update LLM configuration"
+        status.update(f"Editing LLM configuration {selected_config.id}.")
         provider_input.focus()
 
     def _save_llm_config_form(self) -> None:
@@ -513,13 +672,14 @@ class AgentbahnTui(App[None]):
         status = self.query_one("#llm-form-status", Static)
 
         api_key = api_key_input.value.strip()
-        if not api_key:
+        if self._selected_llm_config_id is None and not api_key:
             status.update("API key is required.")
             api_key_input.focus()
             return
 
         try:
             payload = LlmConfigUpsertRequest(
+                id=self._selected_llm_config_id,
                 provider=provider_input.value,
                 llm_name=llm_name_input.value,
                 lm_backend_path=lm_backend_path_input.value,
@@ -531,14 +691,45 @@ class AgentbahnTui(App[None]):
 
         saved_config = self._save_llm_config_command(payload)
         configs = self._fetch_llm_configs_command().configs
+        if not any(config.id == saved_config.id for config in configs):
+            configs = sorted(
+                [*configs, saved_config],
+                key=lambda config: config.id,
+            )
+        self._llm_configs = configs
+        self._selected_llm_config_id = saved_config.id
         llm_config_list = self.query_one("#llm-config-list", Static)
+        llm_config_select = self.query_one("#llm-config-select", Select)
+        save_button = self.query_one("#llm-save-button", Button)
         api_key_input.value = ""
-        provider_input.value = ""
-        llm_name_input.value = ""
-        lm_backend_path_input.value = "default"
+        provider_input.value = saved_config.provider
+        llm_name_input.value = saved_config.llm_name
+        lm_backend_path_input.value = saved_config.lm_backend_path
+        api_key_input.placeholder = (
+            "Leave blank to keep configured key"
+            if saved_config.api_key_configured
+            else "Required"
+        )
+        self._suppress_llm_select_change = True
+        llm_config_select.set_options(
+            [
+                ("Create new configuration", "new"),
+                *[
+                    (_format_llm_config_option(config), str(config.id))
+                    for config in configs
+                ],
+            ]
+        )
+        llm_config_select.value = str(saved_config.id)
+        self.set_timer(
+            0.1,
+            lambda: setattr(self, "_suppress_llm_select_change", False),
+        )
         llm_config_list.update(_format_llm_config_list(configs))
+        save_button.label = "Update LLM configuration"
+        action = "Updated" if payload.id is not None else "Created"
         status.update(
-            "Created LLM configuration.\n"
+            f"{action} LLM configuration.\n"
             f"ID: {saved_config.id}\n"
             f"Provider: {saved_config.provider}\n"
             f"LLM name: {saved_config.llm_name}\n"
@@ -546,6 +737,16 @@ class AgentbahnTui(App[None]):
             "API key: "
             f"{'configured' if saved_config.api_key_configured else 'missing'}"
         )
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id != "llm-config-select":
+            return
+        if self._suppress_llm_select_change:
+            return
+        if event.value == "new" or event.value == Select.NULL:
+            self._select_llm_config(None)
+            return
+        self._select_llm_config(int(str(event.value)))
 
     def _replace_command_input_value(self, value: str) -> None:
         command_input = self.query_one("#command-input", Input)
@@ -590,6 +791,12 @@ class AgentbahnTui(App[None]):
             return
 
         normalized_value = event.value.strip()
+        if not normalized_value:
+            self._show_message(get_placeholder_message())
+            event.input.value = ""
+            event.input.focus()
+            return
+
         if normalized_value == "/llm":
             self._command_history.record(event.value)
             append_command_history(self._history_file, event.value)
@@ -597,7 +804,7 @@ class AgentbahnTui(App[None]):
             self._show_llm_config_form()
             event.input.value = ""
             return
-        else:
+        if is_registered_slash_command(normalized_value):
             self._command_history.record(event.value)
             append_command_history(self._history_file, event.value)
             self._set_command_input_secret_mode(False)
@@ -607,16 +814,33 @@ class AgentbahnTui(App[None]):
                 self._fetch_tasks_command,
                 self._fetch_project_events_command,
             )
-        if result.kind == "projects" and result.projects is not None:
-            self._show_projects(result.projects)
-        elif result.kind == "tasks" and result.tasks is not None:
-            self._show_tasks(result.tasks)
-        elif result.kind == "events" and result.events is not None:
-            self._show_events(result.events)
-        else:
-            self._show_message(result.message or get_placeholder_message())
+            if result.kind == "projects" and result.projects is not None:
+                self._show_projects(result.projects)
+            elif result.kind == "tasks" and result.tasks is not None:
+                self._show_tasks(result.tasks)
+            elif result.kind == "events" and result.events is not None:
+                self._show_events(result.events)
+            else:
+                self._show_message(result.message or get_placeholder_message())
+            event.input.value = ""
+            event.input.focus()
+            return
+
+        if normalized_value.startswith("/"):
+            self._command_history.record(event.value)
+            append_command_history(self._history_file, event.value)
+            self._set_command_input_secret_mode(False)
+            self._show_message(f"Unknown command: {normalized_value}")
+            event.input.value = ""
+            event.input.focus()
+            return
+
+        self._command_history.record(event.value)
+        append_command_history(self._history_file, event.value)
+        self._set_command_input_secret_mode(False)
         event.input.value = ""
         event.input.focus()
+        self._start_agent_stream(normalized_value)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "llm-save-button":
