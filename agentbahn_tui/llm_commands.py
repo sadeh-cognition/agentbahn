@@ -11,14 +11,15 @@ from agentbahn_tui.command_results import CommandResult
 from agentbahn_tui.command_results import message_result
 
 
-PromptStep = Literal["provider", "llm_name", "api_key"]
+PromptStep = Literal["name", "provider", "llm_name", "api_key"]
 
 
 @dataclass(frozen=True)
 class LlmConfigurationPromptState:
+    name: str | None = None
     provider: str | None = None
     llm_name: str | None = None
-    step: PromptStep = "provider"
+    step: PromptStep = "name"
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ def format_llm_configuration(config: LlmConfigResponse) -> str:
     return (
         "Current LLM configuration:\n"
         f"ID: {config.id}\n"
+        f"Name: {config.name}\n"
         f"Provider: {config.provider}\n"
         f"LLM name: {config.llm_name}\n"
         f"LM backend path: {config.lm_backend_path}\n"
@@ -49,8 +51,8 @@ def start_llm_command(
             result=message_result(format_llm_configuration(lookup_response.config))
         )
     return LlmCommandTransition(
-        result=message_result("No LLM configuration found.\nEnter provider:"),
-        next_state=LlmConfigurationPromptState(step="provider"),
+        result=message_result("No LLM configuration found.\nEnter name:"),
+        next_state=LlmConfigurationPromptState(step="name"),
     )
 
 
@@ -67,10 +69,20 @@ def continue_llm_configuration(
             secret_input=state.step == "api_key",
         )
 
+    if state.step == "name":
+        return LlmCommandTransition(
+            result=message_result("Enter provider:"),
+            next_state=LlmConfigurationPromptState(
+                name=normalized_value,
+                step="provider",
+            ),
+        )
+
     if state.step == "provider":
         return LlmCommandTransition(
             result=message_result("Enter LLM name:"),
             next_state=LlmConfigurationPromptState(
+                name=state.name,
                 provider=normalized_value,
                 step="llm_name",
             ),
@@ -80,6 +92,7 @@ def continue_llm_configuration(
         return LlmCommandTransition(
             result=message_result("Enter API key:"),
             next_state=LlmConfigurationPromptState(
+                name=state.name,
                 provider=state.provider,
                 llm_name=normalized_value,
                 step="api_key",
@@ -89,6 +102,7 @@ def continue_llm_configuration(
 
     saved_config = save_llm_config_command(
         LlmConfigUpsertRequest(
+            name=state.name or "",
             provider=state.provider or "",
             llm_name=state.llm_name or "",
             api_key=normalized_value,
@@ -102,6 +116,8 @@ def continue_llm_configuration(
 
 
 def _build_blank_value_message(step: PromptStep) -> str:
+    if step == "name":
+        return "Name cannot be empty.\nEnter name:"
     if step == "provider":
         return "Provider cannot be empty.\nEnter provider:"
     if step == "llm_name":

@@ -31,6 +31,7 @@ def decrypt_api_key(value: str) -> str:
 
 
 class LlmConfiguration(models.Model):
+    name = models.CharField(max_length=255)
     provider = models.CharField(max_length=255)
     llm_name = models.CharField(max_length=255)
     lm_backend_path = models.CharField(max_length=255, default="default")
@@ -40,10 +41,13 @@ class LlmConfiguration(models.Model):
     id: int
 
     def clean(self) -> None:
+        self.name = self.name.strip()
         self.provider = self.provider.strip()
         self.llm_name = self.llm_name.strip()
         self.lm_backend_path = self.lm_backend_path.strip()
         self.encrypted_api_key = self.encrypted_api_key.strip()
+        if not self.name:
+            raise ValidationError({"name": "This field cannot be blank."})
         if not self.provider:
             raise ValidationError({"provider": "This field cannot be blank."})
         if not self.llm_name:

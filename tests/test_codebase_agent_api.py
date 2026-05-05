@@ -51,6 +51,7 @@ def test_codebase_agent_builds_llm_configuration_outside_async_context(db) -> No
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         encrypted_api_key=encrypt_api_key("secret-key"),
@@ -66,6 +67,7 @@ def test_codebase_agent_builds_selected_llm_configuration(db) -> None:
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         encrypted_api_key=encrypt_api_key("secret-key"),
@@ -73,6 +75,7 @@ def test_codebase_agent_builds_selected_llm_configuration(db) -> None:
     baker.make(
         LlmConfiguration,
         pk=2,
+        name="OpenAI main",
         provider="openai",
         llm_name="gpt-5.5",
         encrypted_api_key=encrypt_api_key("other-key"),

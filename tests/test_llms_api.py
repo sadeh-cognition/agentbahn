@@ -36,6 +36,7 @@ def test_get_llm_config_returns_existing_configuration(db) -> None:
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         encrypted_api_key=encrypt_api_key("secret-key"),
@@ -48,6 +49,7 @@ def test_get_llm_config_returns_existing_configuration(db) -> None:
         "exists": True,
         "config": {
             "id": 1,
+            "name": "Groq fast",
             "provider": "groq",
             "llm_name": "llama-3.1-8b-instant",
             "lm_backend_path": "default",
@@ -61,6 +63,7 @@ def test_post_llm_config_persists_encrypted_api_key(db) -> None:
         "/api/llm-config",
         json={
             "provider": "groq",
+            "name": "Groq fast",
             "llm_name": "llama-3.1-8b-instant",
             "lm_backend_path": "agentbahn.llms.custom_backend",
             "api_key": "secret-key",
@@ -70,6 +73,7 @@ def test_post_llm_config_persists_encrypted_api_key(db) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "id": 1,
+        "name": "Groq fast",
         "provider": "groq",
         "llm_name": "llama-3.1-8b-instant",
         "lm_backend_path": "agentbahn.llms.custom_backend",
@@ -77,6 +81,7 @@ def test_post_llm_config_persists_encrypted_api_key(db) -> None:
     }
 
     config = LlmConfiguration.objects.get(pk=1)
+    assert config.name == "Groq fast"
     assert config.provider == "groq"
     assert config.llm_name == "llama-3.1-8b-instant"
     assert config.lm_backend_path == "agentbahn.llms.custom_backend"
@@ -89,6 +94,7 @@ def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         encrypted_api_key=encrypt_api_key("secret-key"),
@@ -98,6 +104,7 @@ def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
         "/api/llm-config",
         json={
             "id": 1,
+            "name": "OpenAI main",
             "provider": "openai",
             "llm_name": "gpt-5.4",
         },
@@ -106,6 +113,7 @@ def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "id": 1,
+        "name": "OpenAI main",
         "provider": "openai",
         "llm_name": "gpt-5.4",
         "lm_backend_path": "default",
@@ -113,6 +121,7 @@ def test_post_llm_config_preserves_existing_api_key_when_omitted(db) -> None:
     }
 
     config = LlmConfiguration.objects.get(pk=1)
+    assert config.name == "OpenAI main"
     assert config.provider == "openai"
     assert config.llm_name == "gpt-5.4"
     assert config.lm_backend_path == "default"
@@ -136,6 +145,7 @@ def test_list_llm_configs_returns_existing_configurations(db) -> None:
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         encrypted_api_key=encrypt_api_key("secret-key"),
@@ -143,6 +153,7 @@ def test_list_llm_configs_returns_existing_configurations(db) -> None:
     baker.make(
         LlmConfiguration,
         pk=2,
+        name="OpenAI custom",
         provider="openai",
         llm_name="gpt-5.5",
         lm_backend_path="agentbahn.llms.custom_backend",
@@ -156,6 +167,7 @@ def test_list_llm_configs_returns_existing_configurations(db) -> None:
         "configs": [
             {
                 "id": 1,
+                "name": "Groq fast",
                 "provider": "groq",
                 "llm_name": "llama-3.1-8b-instant",
                 "lm_backend_path": "default",
@@ -163,6 +175,7 @@ def test_list_llm_configs_returns_existing_configurations(db) -> None:
             },
             {
                 "id": 2,
+                "name": "OpenAI custom",
                 "provider": "openai",
                 "llm_name": "gpt-5.5",
                 "lm_backend_path": "agentbahn.llms.custom_backend",
@@ -178,6 +191,7 @@ def test_build_dspy_lm_from_configuration_uses_persisted_provider_model_and_key(
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         encrypted_api_key=encrypt_api_key("secret-key"),
@@ -203,6 +217,7 @@ def test_build_dspy_lm_from_configuration_uses_custom_backend_module(db) -> None
     baker.make(
         LlmConfiguration,
         pk=1,
+        name="OpenAI custom",
         provider="openai",
         llm_name="gpt-5.5",
         lm_backend_path=module_name,

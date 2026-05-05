@@ -47,6 +47,7 @@ def build_dspy_lm_from_configuration(
 def serialize_llm_configuration(config: LlmConfiguration) -> LlmConfigResponse:
     return LlmConfigResponse(
         id=config.id,
+        name=config.name,
         provider=config.provider,
         llm_name=config.llm_name,
         lm_backend_path=config.lm_backend_path,
@@ -65,6 +66,7 @@ def upsert_llm_configuration(payload: LlmConfigUpsertRequest) -> LlmConfiguratio
             raise ValueError("API key is required when creating LLM configuration.")
         config = LlmConfiguration()
 
+    config.name = payload.name or f"{payload.provider}/{payload.llm_name}"
     config.provider = payload.provider
     config.llm_name = payload.llm_name
     config.lm_backend_path = payload.lm_backend_path

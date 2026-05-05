@@ -6,6 +6,7 @@ from pydantic import field_validator
 
 class LlmConfigResponse(Schema):
     id: int = 0
+    name: str
     provider: str
     llm_name: str
     lm_backend_path: str = "default"
@@ -23,6 +24,7 @@ class LlmConfigLookupResponse(Schema):
 
 class LlmConfigUpsertRequest(Schema):
     id: int | None = None
+    name: str | None = None
     provider: str
     llm_name: str
     lm_backend_path: str = "default"
@@ -35,6 +37,14 @@ class LlmConfigUpsertRequest(Schema):
         if not normalized_value:
             raise ValueError("This field cannot be blank.")
         return normalized_value
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        return normalized_value or None
 
     @field_validator("api_key")
     @classmethod

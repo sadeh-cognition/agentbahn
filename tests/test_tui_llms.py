@@ -29,6 +29,7 @@ def test_fetch_llm_config_uses_agentbahn_api_base_url(settings) -> None:
             json={
                 "exists": True,
                 "config": {
+                    "name": "Groq fast",
                     "provider": "groq",
                     "llm_name": "llama-3.1-8b-instant",
                     "api_key_configured": True,
@@ -41,6 +42,7 @@ def test_fetch_llm_config_uses_agentbahn_api_base_url(settings) -> None:
     assert response == LlmConfigLookupResponse(
         exists=True,
         config=LlmConfigResponse(
+            name="Groq fast",
             provider="groq",
             llm_name="llama-3.1-8b-instant",
             api_key_configured=True,
@@ -59,6 +61,7 @@ def test_fetch_llm_configs_uses_agentbahn_api_base_url(settings) -> None:
                 "configs": [
                     {
                         "id": 1,
+                        "name": "Groq fast",
                         "provider": "groq",
                         "llm_name": "llama-3.1-8b-instant",
                         "api_key_configured": True,
@@ -73,6 +76,7 @@ def test_fetch_llm_configs_uses_agentbahn_api_base_url(settings) -> None:
         configs=[
             LlmConfigResponse(
                 id=1,
+                name="Groq fast",
                 provider="groq",
                 llm_name="llama-3.1-8b-instant",
                 api_key_configured=True,
@@ -88,11 +92,12 @@ def test_save_llm_config_posts_schema_payload(settings) -> None:
         assert request.url.path == "/api/llm-config"
         assert request.method == "POST"
         assert request.content == (
-            b'{"provider":"groq","llm_name":"llama-3.1-8b-instant","api_key":"secret-key"}'
+            b'{"name":"Groq fast","provider":"groq","llm_name":"llama-3.1-8b-instant","api_key":"secret-key"}'
         )
         return httpx.Response(
             200,
             json={
+                "name": "Groq fast",
                 "provider": "groq",
                 "llm_name": "llama-3.1-8b-instant",
                 "api_key_configured": True,
@@ -101,6 +106,7 @@ def test_save_llm_config_posts_schema_payload(settings) -> None:
 
     response = save_llm_config(
         LlmConfigUpsertRequest(
+            name="Groq fast",
             provider="groq",
             llm_name="llama-3.1-8b-instant",
             api_key="secret-key",
@@ -109,6 +115,7 @@ def test_save_llm_config_posts_schema_payload(settings) -> None:
     )
 
     assert response == LlmConfigResponse(
+        name="Groq fast",
         provider="groq",
         llm_name="llama-3.1-8b-instant",
         api_key_configured=True,
@@ -121,10 +128,11 @@ def test_save_llm_config_omits_absent_api_key(settings) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/llm-config"
         assert request.method == "POST"
-        assert request.content == b'{"provider":"openai","llm_name":"gpt-5.4"}'
+        assert request.content == b'{"name":"OpenAI main","provider":"openai","llm_name":"gpt-5.4"}'
         return httpx.Response(
             200,
             json={
+                "name": "OpenAI main",
                 "provider": "openai",
                 "llm_name": "gpt-5.4",
                 "api_key_configured": True,
@@ -133,6 +141,7 @@ def test_save_llm_config_omits_absent_api_key(settings) -> None:
 
     response = save_llm_config(
         LlmConfigUpsertRequest(
+            name="OpenAI main",
             provider="openai",
             llm_name="gpt-5.4",
         ),
@@ -140,6 +149,7 @@ def test_save_llm_config_omits_absent_api_key(settings) -> None:
     )
 
     assert response == LlmConfigResponse(
+        name="OpenAI main",
         provider="openai",
         llm_name="gpt-5.4",
         api_key_configured=True,
@@ -176,6 +186,7 @@ def test_start_llm_command_shows_existing_configuration() -> None:
         lambda: LlmConfigLookupResponse(
             exists=True,
             config=LlmConfigResponse(
+                name="Groq fast",
                 provider="groq",
                 llm_name="llama-3.1-8b-instant",
                 api_key_configured=True,
@@ -188,6 +199,7 @@ def test_start_llm_command_shows_existing_configuration() -> None:
     assert transition.result.message == (
         "Current LLM configuration:\n"
         "ID: 0\n"
+        "Name: Groq fast\n"
         "Provider: groq\n"
         "LLM name: llama-3.1-8b-instant\n"
         "LM backend path: default\n"
@@ -196,12 +208,28 @@ def test_start_llm_command_shows_existing_configuration() -> None:
 
 
 def test_continue_llm_configuration_collects_and_saves_values() -> None:
-    provider_step = continue_llm_configuration(
+    name_step = continue_llm_configuration(
         state=start_llm_command(
             lambda: LlmConfigLookupResponse(exists=False)
         ).next_state,
+        value="Groq fast",
+        save_llm_config_command=lambda payload: LlmConfigResponse(
+            name=payload.name or "",
+            provider=payload.provider,
+            llm_name=payload.llm_name,
+            api_key_configured=bool(payload.api_key),
+        ),
+    )
+
+    assert name_step.next_state is not None
+    assert name_step.next_state.name == "Groq fast"
+    assert name_step.next_state.step == "provider"
+
+    provider_step = continue_llm_configuration(
+        state=name_step.next_state,
         value="groq",
         save_llm_config_command=lambda payload: LlmConfigResponse(
+            name=payload.name or "",
             provider=payload.provider,
             llm_name=payload.llm_name,
             api_key_configured=bool(payload.api_key),
@@ -216,6 +244,7 @@ def test_continue_llm_configuration_collects_and_saves_values() -> None:
         state=provider_step.next_state,
         value="llama-3.1-8b-instant",
         save_llm_config_command=lambda payload: LlmConfigResponse(
+            name=payload.name or "",
             provider=payload.provider,
             llm_name=payload.llm_name,
             api_key_configured=bool(payload.api_key),
@@ -233,6 +262,7 @@ def test_continue_llm_configuration_collects_and_saves_values() -> None:
         save_llm_config_command=lambda payload: (
             captured_payloads.append(payload)
             or LlmConfigResponse(
+                name=payload.name or "",
                 provider=payload.provider,
                 llm_name=payload.llm_name,
                 api_key_configured=True,
@@ -242,6 +272,7 @@ def test_continue_llm_configuration_collects_and_saves_values() -> None:
 
     assert captured_payloads == [
         LlmConfigUpsertRequest(
+            name="Groq fast",
             provider="groq",
             llm_name="llama-3.1-8b-instant",
             api_key="secret-key",
@@ -266,6 +297,7 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
                 captured_payloads.append(payload)
                 or LlmConfigResponse(
                     id=1,
+                    name=payload.name or "",
                     provider=payload.provider,
                     llm_name=payload.llm_name,
                     api_key_configured=bool(payload.api_key),
@@ -279,6 +311,9 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
             await pilot.press("enter")
             assert app.query_one("#llm-config-form").display is True
 
+            await pilot.press("G", "r", "o", "q", " ", "f", "a", "s", "t")
+            await pilot.press("tab")
+
             await pilot.press("g", "r", "o", "q")
             await pilot.press("tab")
 
@@ -290,6 +325,7 @@ def test_tui_llm_command_shows_editable_form_and_avoids_storing_api_key_in_histo
             await pilot.press("enter")
             assert captured_payloads == [
                 LlmConfigUpsertRequest(
+                    name="Groq fast",
                     provider="groq",
                     llm_name="llama",
                     api_key="secret",
@@ -317,6 +353,7 @@ def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
                 configs=[
                     LlmConfigResponse(
                         id=1,
+                        name="Groq fast",
                         provider="groq",
                         llm_name="llama-3.1-8b-instant",
                         api_key_configured=True,
@@ -327,6 +364,7 @@ def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
                 captured_payloads.append(payload)
                 or LlmConfigResponse(
                     id=2,
+                    name=payload.name or "",
                     provider=payload.provider,
                     llm_name=payload.llm_name,
                     api_key_configured=True,
@@ -338,6 +376,7 @@ def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
         async with app.run_test() as pilot:
             await pilot.press("/", "l", "l", "m")
             await pilot.press("enter")
+            friendly_name_input = app.query_one("#llm-friendly-name-input")
             provider_input = app.query_one("#llm-provider-input")
             llm_name_input = app.query_one("#llm-name-input")
             lm_backend_path_input = app.query_one("#llm-backend-path-input")
@@ -345,16 +384,20 @@ def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
             api_key_input = app.query_one("#llm-api-key-input")
             llm_config_list = app.query_one("#llm-config-list")
 
+            assert friendly_name_input.value == ""
             assert provider_input.value == ""
             assert llm_name_input.value == ""
             assert lm_backend_path_input.value == "default"
-            assert "1. groq/llama-3.1-8b-instant" in str(llm_config_list.content)
+            assert "1. Groq fast - groq/llama-3.1-8b-instant" in str(
+                llm_config_list.content
+            )
             assert "custom DSPy LM backend module" in str(lm_backend_path_tip.content)
             assert "'default' uses DSPy's standard LM backend" in str(
                 lm_backend_path_tip.content
             )
             assert api_key_input.value == ""
 
+            friendly_name_input.value = "OpenAI main"
             provider_input.value = "openai"
             llm_name_input.value = "gpt-5.4"
             lm_backend_path_input.value = "agentbahn.llms.custom_backend"
@@ -363,6 +406,7 @@ def test_tui_llm_form_lists_existing_configs_and_creates_new_config(
 
         assert captured_payloads == [
             LlmConfigUpsertRequest(
+                name="OpenAI main",
                 provider="openai",
                 llm_name="gpt-5.4",
                 lm_backend_path="agentbahn.llms.custom_backend",
@@ -378,6 +422,7 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
         captured_payloads: list[LlmConfigUpsertRequest] = []
         saved_response = LlmConfigResponse(
             id=1,
+            name="OpenAI main",
             provider="openai",
             llm_name="gpt-5.4",
             lm_backend_path="agentbahn.llms.custom_backend",
@@ -386,6 +431,7 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
         configs = [
             LlmConfigResponse(
                 id=1,
+                name="Groq fast",
                 provider="groq",
                 llm_name="llama-3.1-8b-instant",
                 api_key_configured=True,
@@ -406,6 +452,7 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
             await pilot.press("/", "l", "l", "m")
             await pilot.press("enter")
             llm_config_select = app.query_one("#llm-config-select")
+            friendly_name_input = app.query_one("#llm-friendly-name-input")
             provider_input = app.query_one("#llm-provider-input")
             llm_name_input = app.query_one("#llm-name-input")
             lm_backend_path_input = app.query_one("#llm-backend-path-input")
@@ -415,6 +462,7 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
             llm_config_select.value = "1"
             await pilot.pause()
 
+            assert friendly_name_input.value == "Groq fast"
             assert provider_input.value == "groq"
             assert llm_name_input.value == "llama-3.1-8b-instant"
             assert lm_backend_path_input.value == "default"
@@ -422,6 +470,7 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
             assert api_key_input.placeholder == "Leave blank to keep configured key"
             assert str(save_button.label) == "Update LLM configuration"
 
+            friendly_name_input.value = "OpenAI main"
             provider_input.value = "openai"
             llm_name_input.value = "gpt-5.4"
             lm_backend_path_input.value = "agentbahn.llms.custom_backend"
@@ -431,6 +480,7 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
             assert captured_payloads == [
                 LlmConfigUpsertRequest(
                     id=1,
+                    name="OpenAI main",
                     provider="openai",
                     llm_name="gpt-5.4",
                     lm_backend_path="agentbahn.llms.custom_backend",
@@ -449,12 +499,14 @@ def test_tui_model_command_selects_config_for_agent_chat(tmp_path) -> None:
         configs = [
             LlmConfigResponse(
                 id=1,
+                name="Groq fast",
                 provider="groq",
                 llm_name="llama-3.1-8b-instant",
                 api_key_configured=True,
             ),
             LlmConfigResponse(
                 id=2,
+                name="OpenAI main",
                 provider="openai",
                 llm_name="gpt-5.5",
                 api_key_configured=True,

@@ -275,7 +275,7 @@ def _format_llm_config_list(configs: list[LlmConfigResponse]) -> str:
     for config in configs:
         api_key_status = "configured" if config.api_key_configured else "missing"
         lines.append(
-            f"{config.id}. {config.provider}/{config.llm_name} "
+            f"{config.id}. {config.name} - {config.provider}/{config.llm_name} "
             f"({config.lm_backend_path}, API key {api_key_status})"
         )
     return "\n".join(lines)
@@ -284,7 +284,7 @@ def _format_llm_config_list(configs: list[LlmConfigResponse]) -> str:
 def _format_llm_config_option(config: LlmConfigResponse) -> str:
     api_key_status = "configured" if config.api_key_configured else "missing"
     return (
-        f"{config.id}. {config.provider}/{config.llm_name} "
+        f"{config.id}. {config.name} - {config.provider}/{config.llm_name} "
         f"({config.lm_backend_path}, API key {api_key_status})"
     )
 
@@ -295,6 +295,7 @@ def _format_model_selection(config: LlmConfigResponse | None) -> str:
     return (
         "Selected model for codebase-agent chat:\n"
         f"ID: {config.id}\n"
+        f"Name: {config.name}\n"
         f"Provider: {config.provider}\n"
         f"LLM name: {config.llm_name}\n"
         f"LM backend path: {config.lm_backend_path}"
@@ -476,6 +477,7 @@ class AgentbahnTui(App[None]):
 
     def _set_llm_form_controls_disabled(self, disabled: bool) -> None:
         self.query_one("#llm-config-select", Select).disabled = disabled
+        self.query_one("#llm-friendly-name-input", Input).disabled = disabled
         self.query_one("#llm-provider-input", Input).disabled = disabled
         self.query_one("#llm-name-input", Input).disabled = disabled
         self.query_one("#llm-backend-path-input", Input).disabled = disabled
@@ -501,6 +503,8 @@ class AgentbahnTui(App[None]):
                         disabled=True,
                     )
                     yield Static("", id="llm-config-list")
+                    yield Label("Name")
+                    yield Input(id="llm-friendly-name-input", disabled=True)
                     yield Label("Provider")
                     yield Input(id="llm-provider-input", disabled=True)
                     yield Label("LLM name")
@@ -671,6 +675,7 @@ class AgentbahnTui(App[None]):
         model_form = self.query_one("#model-select-form", Vertical)
         llm_config_select = self.query_one("#llm-config-select", Select)
         llm_config_list = self.query_one("#llm-config-list", Static)
+        friendly_name_input = self.query_one("#llm-friendly-name-input", Input)
         provider_input = self.query_one("#llm-provider-input", Input)
         llm_name_input = self.query_one("#llm-name-input", Input)
         lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
@@ -697,6 +702,7 @@ class AgentbahnTui(App[None]):
         )
         llm_config_select.value = "new"
         llm_config_list.update(_format_llm_config_list(configs))
+        friendly_name_input.value = ""
         provider_input.value = ""
         llm_name_input.value = ""
         lm_backend_path_input.value = "default"
@@ -704,7 +710,7 @@ class AgentbahnTui(App[None]):
         api_key_input.placeholder = "Required"
         save_button.label = "Create LLM configuration"
         status.update("Create a new LLM configuration.")
-        provider_input.focus()
+        friendly_name_input.focus()
 
     def _show_model_select_form(self) -> None:
         configs = self._fetch_llm_configs_command().configs
@@ -771,6 +777,7 @@ class AgentbahnTui(App[None]):
     def _select_llm_config(self, config_id: int | None) -> None:
         self._selected_llm_config_id = config_id
         provider_input = self.query_one("#llm-provider-input", Input)
+        friendly_name_input = self.query_one("#llm-friendly-name-input", Input)
         llm_name_input = self.query_one("#llm-name-input", Input)
         lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
         api_key_input = self.query_one("#llm-api-key-input", Input)
@@ -778,6 +785,7 @@ class AgentbahnTui(App[None]):
         status = self.query_one("#llm-form-status", Static)
 
         if config_id is None:
+            friendly_name_input.value = ""
             provider_input.value = ""
             llm_name_input.value = ""
             lm_backend_path_input.value = "default"
@@ -785,7 +793,7 @@ class AgentbahnTui(App[None]):
             api_key_input.placeholder = "Required"
             save_button.label = "Create LLM configuration"
             status.update("Create a new LLM configuration.")
-            provider_input.focus()
+            friendly_name_input.focus()
             return
 
         selected_config = next(
@@ -796,6 +804,7 @@ class AgentbahnTui(App[None]):
             status.update(f"LLM configuration {config_id} was not found.")
             return
 
+        friendly_name_input.value = selected_config.name
         provider_input.value = selected_config.provider
         llm_name_input.value = selected_config.llm_name
         lm_backend_path_input.value = selected_config.lm_backend_path
@@ -807,9 +816,10 @@ class AgentbahnTui(App[None]):
         )
         save_button.label = "Update LLM configuration"
         status.update(f"Editing LLM configuration {selected_config.id}.")
-        provider_input.focus()
+        friendly_name_input.focus()
 
     def _save_llm_config_form(self) -> None:
+        friendly_name_input = self.query_one("#llm-friendly-name-input", Input)
         provider_input = self.query_one("#llm-provider-input", Input)
         llm_name_input = self.query_one("#llm-name-input", Input)
         lm_backend_path_input = self.query_one("#llm-backend-path-input", Input)
@@ -825,6 +835,7 @@ class AgentbahnTui(App[None]):
         try:
             payload = LlmConfigUpsertRequest(
                 id=self._selected_llm_config_id,
+                name=friendly_name_input.value,
                 provider=provider_input.value,
                 llm_name=llm_name_input.value,
                 lm_backend_path=lm_backend_path_input.value,
@@ -847,6 +858,7 @@ class AgentbahnTui(App[None]):
         llm_config_select = self.query_one("#llm-config-select", Select)
         save_button = self.query_one("#llm-save-button", Button)
         api_key_input.value = ""
+        friendly_name_input.value = saved_config.name
         provider_input.value = saved_config.provider
         llm_name_input.value = saved_config.llm_name
         lm_backend_path_input.value = saved_config.lm_backend_path
@@ -876,6 +888,7 @@ class AgentbahnTui(App[None]):
         status.update(
             f"{action} LLM configuration.\n"
             f"ID: {saved_config.id}\n"
+            f"Name: {saved_config.name}\n"
             f"Provider: {saved_config.provider}\n"
             f"LLM name: {saved_config.llm_name}\n"
             f"LM backend path: {saved_config.lm_backend_path}\n"
@@ -943,6 +956,7 @@ class AgentbahnTui(App[None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "command-input":
             if event.input.id in {
+                "llm-friendly-name-input",
                 "llm-provider-input",
                 "llm-name-input",
                 "llm-backend-path-input",
