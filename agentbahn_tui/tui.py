@@ -76,11 +76,19 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
         arguments="-",
         description="Show or configure the LLM used by agentbahn.",
     ),
+    CommandHelpEntry(
+        entity="model",
+        command="/model",
+        shortcut="-",
+        arguments="-",
+        description="Pick the LLM configuration used by codebase-agent chat.",
+    ),
 )
 
 SLASH_COMMAND_WORDS: frozenset[str] = frozenset(
     {
         "/llm",
+        "/model",
         "/pel",
         "/pl",
         "/project",
@@ -272,6 +280,18 @@ def _format_llm_config_option(config: LlmConfigResponse) -> str:
     )
 
 
+def _format_model_selection(config: LlmConfigResponse | None) -> str:
+    if config is None:
+        return "No model selected. Chat will use the backend default LLM configuration."
+    return (
+        "Selected model for codebase-agent chat:\n"
+        f"ID: {config.id}\n"
+        f"Provider: {config.provider}\n"
+        f"LLM name: {config.llm_name}\n"
+        f"LM backend path: {config.lm_backend_path}"
+    )
+
+
 def format_project_events_output(events: EventLogListResponse) -> CommandResult:
     if not events:
         return message_result("No events found.")
@@ -386,6 +406,19 @@ class AgentbahnTui(App[None]):
         margin-top: 1;
     }
 
+    #model-select-form {
+        display: none;
+        padding: 1 0;
+    }
+
+    #model-select-form Select {
+        margin-bottom: 1;
+    }
+
+    #model-status {
+        margin-top: 1;
+    }
+
     #command-input {
         dock: bottom;
         margin: 0 1 1 1;
@@ -407,7 +440,7 @@ class AgentbahnTui(App[None]):
             [LlmConfigUpsertRequest], LlmConfigResponse
         ] = save_llm_config,
         stream_agent_command: Callable[
-            [str], Iterator[CodebaseAgentStreamEvent]
+            [str, int | None], Iterator[CodebaseAgentStreamEvent]
         ] = stream_codebase_agent,
         history_file: Path | None = None,
     ) -> None:
@@ -427,6 +460,7 @@ class AgentbahnTui(App[None]):
         self._llm_configs: list[LlmConfigResponse] = []
         self._selected_llm_config_id: int | None = None
         self._suppress_llm_select_change = False
+        self._selected_model_config_id: int | None = None
 
     def _set_llm_form_controls_disabled(self, disabled: bool) -> None:
         self.query_one("#llm-config-select", Select).disabled = disabled
@@ -435,6 +469,10 @@ class AgentbahnTui(App[None]):
         self.query_one("#llm-backend-path-input", Input).disabled = disabled
         self.query_one("#llm-api-key-input", Input).disabled = disabled
         self.query_one("#llm-save-button", Button).disabled = disabled
+
+    def _set_model_form_controls_disabled(self, disabled: bool) -> None:
+        self.query_one("#model-config-select", Select).disabled = disabled
+        self.query_one("#model-use-button", Button).disabled = disabled
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -476,6 +514,21 @@ class AgentbahnTui(App[None]):
                         disabled=True,
                     )
                     yield Static("", id="llm-form-status")
+                with Vertical(id="model-select-form"):
+                    yield Label("Model")
+                    yield Select(
+                        [],
+                        id="model-config-select",
+                        allow_blank=True,
+                        disabled=True,
+                    )
+                    yield Static("", id="model-config-list")
+                    yield Button(
+                        "Use selected model",
+                        id="model-use-button",
+                        disabled=True,
+                    )
+                    yield Static("", id="model-status")
             yield CommandInput(placeholder="/project list", id="command-input")
         yield Footer()
 
@@ -487,11 +540,14 @@ class AgentbahnTui(App[None]):
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        model_form = self.query_one("#model-select-form", Vertical)
         message_output.display = True
         message_output.update(message)
         results_table.display = False
         llm_form.display = False
+        model_form.display = False
         self._set_llm_form_controls_disabled(True)
+        self._set_model_form_controls_disabled(True)
         results_table.clear(columns=True)
 
     def _start_agent_stream(self, query: str) -> None:
@@ -506,7 +562,10 @@ class AgentbahnTui(App[None]):
 
     def _run_agent_stream(self, query: str) -> None:
         try:
-            for event in self._stream_agent_command(query):
+            for event in self._stream_agent_command(
+                query,
+                self._selected_model_config_id,
+            ):
                 self.call_from_thread(self._apply_agent_stream_event, event)
         except Exception as exc:
             self.call_from_thread(
@@ -533,10 +592,13 @@ class AgentbahnTui(App[None]):
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        model_form = self.query_one("#model-select-form", Vertical)
         message_output.display = False
         results_table.display = True
         llm_form.display = False
+        model_form.display = False
         self._set_llm_form_controls_disabled(True)
+        self._set_model_form_controls_disabled(True)
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Name", "Description")
         for project in projects:
@@ -546,10 +608,13 @@ class AgentbahnTui(App[None]):
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        model_form = self.query_one("#model-select-form", Vertical)
         message_output.display = False
         results_table.display = True
         llm_form.display = False
+        model_form.display = False
         self._set_llm_form_controls_disabled(True)
+        self._set_model_form_controls_disabled(True)
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Status", "Title", "Feature", "Assignee")
         for task in tasks:
@@ -565,10 +630,13 @@ class AgentbahnTui(App[None]):
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        model_form = self.query_one("#model-select-form", Vertical)
         message_output.display = False
         results_table.display = True
         llm_form.display = False
+        model_form.display = False
         self._set_llm_form_controls_disabled(True)
+        self._set_model_form_controls_disabled(True)
         results_table.clear(columns=True)
         results_table.add_columns("ID", "Entity", "Entity ID", "Event Type", "Details")
         for event in events:
@@ -588,6 +656,7 @@ class AgentbahnTui(App[None]):
         message_output = self.query_one("#message-output", Static)
         results_table = self.query_one("#results-table", DataTable)
         llm_form = self.query_one("#llm-config-form", Vertical)
+        model_form = self.query_one("#model-select-form", Vertical)
         llm_config_select = self.query_one("#llm-config-select", Select)
         llm_config_list = self.query_one("#llm-config-list", Static)
         provider_input = self.query_one("#llm-provider-input", Input)
@@ -601,7 +670,9 @@ class AgentbahnTui(App[None]):
         results_table.display = False
         results_table.clear(columns=True)
         llm_form.display = True
+        model_form.display = False
         self._set_llm_form_controls_disabled(False)
+        self._set_model_form_controls_disabled(True)
 
         llm_config_select.set_options(
             [
@@ -622,6 +693,68 @@ class AgentbahnTui(App[None]):
         save_button.label = "Create LLM configuration"
         status.update("Create a new LLM configuration.")
         provider_input.focus()
+
+    def _show_model_select_form(self) -> None:
+        configs = self._fetch_llm_configs_command().configs
+        self._llm_configs = configs
+
+        message_output = self.query_one("#message-output", Static)
+        results_table = self.query_one("#results-table", DataTable)
+        llm_form = self.query_one("#llm-config-form", Vertical)
+        model_form = self.query_one("#model-select-form", Vertical)
+        model_config_select = self.query_one("#model-config-select", Select)
+        model_config_list = self.query_one("#model-config-list", Static)
+        status = self.query_one("#model-status", Static)
+
+        message_output.display = False
+        results_table.display = False
+        results_table.clear(columns=True)
+        llm_form.display = False
+        model_form.display = True
+        self._set_llm_form_controls_disabled(True)
+
+        if not configs:
+            model_config_select.set_options([])
+            model_config_list.update("Existing LLM configurations: none")
+            status.update("No LLM configurations found. Use /llm to create one.")
+            self._set_model_form_controls_disabled(True)
+            return
+
+        model_config_select.set_options(
+            [(_format_llm_config_option(config), str(config.id)) for config in configs]
+        )
+        selected_config = next(
+            (
+                config
+                for config in configs
+                if config.id == self._selected_model_config_id
+            ),
+            configs[0],
+        )
+        model_config_select.value = str(selected_config.id)
+        model_config_list.update(_format_llm_config_list(configs))
+        status.update(_format_model_selection(selected_config))
+        self._set_model_form_controls_disabled(False)
+        model_config_select.focus()
+
+    def _select_model_config(self) -> None:
+        model_config_select = self.query_one("#model-config-select", Select)
+        status = self.query_one("#model-status", Static)
+        if model_config_select.value == Select.NULL:
+            status.update("Select an LLM configuration.")
+            return
+
+        config_id = int(str(model_config_select.value))
+        selected_config = next(
+            (config for config in self._llm_configs if config.id == config_id),
+            None,
+        )
+        if selected_config is None:
+            status.update(f"LLM configuration {config_id} was not found.")
+            return
+
+        self._selected_model_config_id = selected_config.id
+        status.update(_format_model_selection(selected_config))
 
     def _select_llm_config(self, config_id: int | None) -> None:
         self._selected_llm_config_id = config_id
@@ -739,6 +872,22 @@ class AgentbahnTui(App[None]):
         )
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "model-config-select":
+            if event.value == Select.NULL:
+                return
+            selected_config = next(
+                (
+                    config
+                    for config in self._llm_configs
+                    if config.id == int(str(event.value))
+                ),
+                None,
+            )
+            self.query_one("#model-status", Static).update(
+                _format_model_selection(selected_config)
+            )
+            return
+
         if event.select.id != "llm-config-select":
             return
         if self._suppress_llm_select_change:
@@ -804,6 +953,13 @@ class AgentbahnTui(App[None]):
             self._show_llm_config_form()
             event.input.value = ""
             return
+        if normalized_value == "/model":
+            self._command_history.record(event.value)
+            append_command_history(self._history_file, event.value)
+            self._set_command_input_secret_mode(False)
+            self._show_model_select_form()
+            event.input.value = ""
+            return
         if is_registered_slash_command(normalized_value):
             self._command_history.record(event.value)
             append_command_history(self._history_file, event.value)
@@ -845,6 +1001,8 @@ class AgentbahnTui(App[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "llm-save-button":
             self._save_llm_config_form()
+        elif event.button.id == "model-use-button":
+            self._select_model_config()
 
 
 def run_tui(

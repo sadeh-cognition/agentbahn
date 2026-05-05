@@ -28,7 +28,9 @@ def test_stream_codebase_agent_posts_request_and_parses_ndjson_events() -> None:
 
     events = list(
         stream_codebase_agent(
-            "  Build feature  ", transport=httpx.MockTransport(handler)
+            "  Build feature  ",
+            llm_config_id=7,
+            transport=httpx.MockTransport(handler),
         )
     )
 
@@ -36,4 +38,7 @@ def test_stream_codebase_agent_posts_request_and_parses_ndjson_events() -> None:
     assert [event.content for event in events] == ["Hel", "lo", "Done"]
     assert len(requests) == 1
     assert requests[0].url == "http://testserver/api/codebase-agent"
-    assert json.loads(requests[0].content) == {"query": "Build feature"}
+    assert json.loads(requests[0].content) == {
+        "query": "Build feature",
+        "llm_config_id": 7,
+    }

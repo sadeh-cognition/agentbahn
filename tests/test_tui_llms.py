@@ -4,6 +4,7 @@ import asyncio
 
 import httpx
 
+from agentbahn.codebase_agent.schemas import CodebaseAgentStreamEvent
 from agentbahn.llms.schemas import LlmConfigListResponse
 from agentbahn.llms.schemas import LlmConfigLookupResponse
 from agentbahn.llms.schemas import LlmConfigResponse
@@ -438,5 +439,58 @@ def test_tui_llm_form_selects_existing_config_for_update(tmp_path) -> None:
             assert "Updated LLM configuration." in str(
                 app.query_one("#llm-form-status").content
             )
+
+    asyncio.run(run_test())
+
+
+def test_tui_model_command_selects_config_for_agent_chat(tmp_path) -> None:
+    async def run_test() -> None:
+        captured_requests: list[tuple[str, int | None]] = []
+        configs = [
+            LlmConfigResponse(
+                id=1,
+                provider="groq",
+                llm_name="llama-3.1-8b-instant",
+                api_key_configured=True,
+            ),
+            LlmConfigResponse(
+                id=2,
+                provider="openai",
+                llm_name="gpt-5.5",
+                api_key_configured=True,
+            ),
+        ]
+
+        def stream_agent_command(query: str, llm_config_id: int | None):
+            captured_requests.append((query, llm_config_id))
+            yield CodebaseAgentStreamEvent(type="result", content="Done")
+
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            fetch_llm_configs_command=lambda: LlmConfigListResponse(configs=configs),
+            stream_agent_command=stream_agent_command,
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "m", "o", "d", "e", "l")
+            await pilot.press("enter")
+            model_select = app.query_one("#model-config-select")
+            model_select.value = "2"
+            await pilot.pause()
+            await pilot.click("#model-use-button")
+            assert "Selected model for codebase-agent chat" in str(
+                app.query_one("#model-status").content
+            )
+
+            command_input = app.query_one("#command-input")
+            command_input.focus()
+            await pilot.press("B", "u", "i", "l", "d")
+            await pilot.press("enter")
+            await pilot.pause()
+
+        assert captured_requests == [("Build", 2)]
 
     asyncio.run(run_test())

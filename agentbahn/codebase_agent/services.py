@@ -14,6 +14,8 @@ from agentbahn.codebase_agent.agent import AgentConfig
 from agentbahn.codebase_agent.agent import DefaultAgent
 from agentbahn.codebase_agent.environment import LocalEnvironment
 from agentbahn.codebase_agent.environment import LocalEnvironmentConfig
+from agentbahn.llms.models import LlmConfiguration
+from agentbahn.llms.services import build_dspy_lm_from_configuration
 
 
 class CodebaseAgent(Protocol):
@@ -29,21 +31,45 @@ class CodebaseAgent(Protocol):
     def _prediction_to_message(self, prediction: dspy.Prediction) -> dict: ...
 
 
-def async_stream_codebase_agent(query: str) -> AsyncIterator[str]:
+def async_stream_codebase_agent(
+    query: str,
+    *,
+    llm_config_id: int | None = None,
+) -> AsyncIterator[str]:
     normalized_query = query.strip()
     if not normalized_query:
         raise ValueError("Query cannot be blank.")
 
-    return _async_stream_codebase_agent(normalized_query)
+    return _async_stream_codebase_agent(
+        normalized_query,
+        llm_config_id=llm_config_id,
+    )
 
 
-async def _async_stream_codebase_agent(normalized_query: str) -> AsyncIterator[str]:
-    agent = await _build_codebase_agent_async()
+def _validate_llm_configuration_id(llm_config_id: int) -> None:
+    if not LlmConfiguration.objects.filter(pk=llm_config_id).exists():
+        raise ValueError(f"LLM configuration {llm_config_id} was not found.")
+
+
+async def validate_llm_configuration_id_async(
+    llm_config_id: int | None,
+) -> None:
+    if llm_config_id is None:
+        return
+    await sync_to_async(_validate_llm_configuration_id)(llm_config_id)
+
+
+async def _async_stream_codebase_agent(
+    normalized_query: str,
+    *,
+    llm_config_id: int | None,
+) -> AsyncIterator[str]:
+    agent = await _build_codebase_agent_async(llm_config_id=llm_config_id)
     async for event in _astream_agent_output(agent, normalized_query):
         yield event
 
 
-def _build_codebase_agent() -> CodebaseAgent:
+def _build_codebase_agent(*, llm_config_id: int | None = None) -> CodebaseAgent:
     env = LocalEnvironment(
         config=LocalEnvironmentConfig(cwd=str(settings.BASE_DIR)),
     )
@@ -51,18 +77,29 @@ def _build_codebase_agent() -> CodebaseAgent:
         step_limit=settings.CODEBASE_AGENT_STEP_LIMIT,
         cost_limit=settings.CODEBASE_AGENT_COST_LIMIT,
     )
-    return _default_agent_factory(env, config)
+    lm = None
+    if llm_config_id is not None:
+        _validate_llm_configuration_id(llm_config_id)
+        llm_config = LlmConfiguration.objects.filter(pk=llm_config_id).first()
+        assert llm_config is not None
+        lm = build_dspy_lm_from_configuration(llm_config)
+    return _default_agent_factory(env, config, lm=lm)
 
 
-async def _build_codebase_agent_async() -> CodebaseAgent:
-    return await sync_to_async(_build_codebase_agent)()
+async def _build_codebase_agent_async(
+    *,
+    llm_config_id: int | None = None,
+) -> CodebaseAgent:
+    return await sync_to_async(_build_codebase_agent)(llm_config_id=llm_config_id)
 
 
 def _default_agent_factory(
     env: LocalEnvironment,
     config: AgentConfig,
+    *,
+    lm: dspy.BaseLM | None = None,
 ) -> DefaultAgent:
-    return DefaultAgent(env=env, config=config)
+    return DefaultAgent(env=env, config=config, lm=lm)
 
 
 def _prediction_result(prediction: dspy.Prediction) -> str:

@@ -13,11 +13,12 @@ from agentbahn_tui.llms import get_agentbahn_api_base_url
 
 def stream_codebase_agent(
     query: str,
+    llm_config_id: int | None = None,
     *,
     transport: httpx.BaseTransport | None = None,
     client_factory: Callable[..., httpx.Client] = httpx.Client,
 ) -> Iterator[CodebaseAgentStreamEvent]:
-    payload = CodebaseAgentRequest(query=query)
+    payload = CodebaseAgentRequest(query=query, llm_config_id=llm_config_id)
     event_adapter = TypeAdapter(CodebaseAgentStreamEvent)
 
     with client_factory(

@@ -8,6 +8,7 @@ from pydantic import field_validator
 
 class CodebaseAgentRequest(Schema):
     query: str
+    llm_config_id: int | None = None
 
     @field_validator("query")
     @classmethod

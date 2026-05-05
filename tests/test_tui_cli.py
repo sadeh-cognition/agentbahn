@@ -38,6 +38,7 @@ def test_placeholder_message_is_stable() -> None:
         "project | /project event list | /pel     | PROJECT_ID | List event log entries for a project and its related entities.\n"
         "task    | /task list          | /tl      | PROJECT_ID | List tasks for a project.\n"
         "llm     | /llm                | -        | -          | Show or configure the LLM used by agentbahn.\n"
+        "model   | /model              | -        | -          | Pick the LLM configuration used by codebase-agent chat.\n"
         "\n"
         "Messages that do not start with / are sent to the DefaultAgent.\n"
         "Type a command or message below and press Enter."
@@ -440,8 +441,8 @@ def test_tui_command_history_persists_across_sessions(tmp_path) -> None:
 def test_tui_non_command_message_streams_to_agent(tmp_path) -> None:
     queries: list[str] = []
 
-    def stream_agent_command(query: str):
-        queries.append(query)
+    def stream_agent_command(query: str, llm_config_id: int | None):
+        queries.append(f"{query}:{llm_config_id}")
         yield CodebaseAgentStreamEvent(type="token", content="Agent ")
         yield CodebaseAgentStreamEvent(type="result", content="done")
 
@@ -458,7 +459,7 @@ def test_tui_non_command_message_streams_to_agent(tmp_path) -> None:
             await pilot.press("B", "u", "i", "l", "d", " ", "i", "t")
             await pilot.press("enter")
             await pilot.pause()
-            assert queries == ["Build it"]
+            assert queries == ["Build it:None"]
             message_output = app.query_one("#message-output")
             assert str(message_output.render()) == "Agent \ndone"
 
@@ -468,7 +469,8 @@ def test_tui_non_command_message_streams_to_agent(tmp_path) -> None:
 def test_tui_agent_slash_message_shows_error(tmp_path) -> None:
     queries: list[str] = []
 
-    def stream_agent_command(query: str):
+    def stream_agent_command(query: str, llm_config_id: int | None):
+        del llm_config_id
         queries.append(query)
         yield CodebaseAgentStreamEvent(type="result", content="Done")
 
@@ -497,7 +499,8 @@ def test_tui_agent_slash_message_shows_error(tmp_path) -> None:
 def test_tui_unknown_slash_message_shows_error(tmp_path) -> None:
     queries: list[str] = []
 
-    def stream_agent_command(query: str):
+    def stream_agent_command(query: str, llm_config_id: int | None):
+        del llm_config_id
         queries.append(query)
         yield CodebaseAgentStreamEvent(type="result", content="Done")
 
