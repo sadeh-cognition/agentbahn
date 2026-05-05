@@ -49,6 +49,13 @@ class CommandHelpEntry:
 
 COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
     CommandHelpEntry(
+        entity="help",
+        command="/help",
+        shortcut="/h",
+        arguments="-",
+        description="Show this help menu.",
+    ),
+    CommandHelpEntry(
         entity="project",
         command="/project list",
         shortcut="/pl",
@@ -87,6 +94,8 @@ COMMAND_HELP_ENTRIES: tuple[CommandHelpEntry, ...] = (
 
 SLASH_COMMAND_WORDS: frozenset[str] = frozenset(
     {
+        "/h",
+        "/help",
         "/llm",
         "/model",
         "/pel",
@@ -305,6 +314,9 @@ def run_tui_command(
     fetch_project_events_command: Callable[[int], EventLogListResponse],
 ) -> CommandResult:
     normalized_command = command.strip()
+    if normalized_command in ("/help", "/h"):
+        return message_result(get_placeholder_message())
+
     if normalized_command in ("/project list", "/pl"):
         return format_projects_output(fetch_projects_command())
 

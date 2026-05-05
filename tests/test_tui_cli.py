@@ -34,6 +34,7 @@ def test_placeholder_message_is_stable() -> None:
         "\n"
         "Entity  | Command             | Shortcut | Arguments  | Description\n"
         "--------+---------------------+----------+------------+---------------------------------------------------------------\n"
+        "help    | /help               | /h       | -          | Show this help menu.\n"
         "project | /project list       | /pl      | -          | List all projects.\n"
         "project | /project event list | /pel     | PROJECT_ID | List event log entries for a project and its related entities.\n"
         "task    | /task list          | /tl      | PROJECT_ID | List tasks for a project.\n"
@@ -114,6 +115,21 @@ def test_console_script_dispatches_to_management_command(monkeypatch) -> None:
     assert exit_code == 0
     assert executed_argv == ["agentbahn-tui", "start_tui", "--help"]
     assert cli.os.environ["DJANGO_SETTINGS_MODULE"] == "agentbahn.settings"
+
+
+def test_run_tui_command_shows_help_menu() -> None:
+    assert run_tui_command(
+        "/help",
+        fetch_projects_command=lambda: [],
+        fetch_tasks_command=lambda _project_id: [],
+        fetch_project_events_command=lambda _project_id: [],
+    ) == CommandResult(kind="message", message=get_placeholder_message())
+    assert run_tui_command(
+        "/h",
+        fetch_projects_command=lambda: [],
+        fetch_tasks_command=lambda _project_id: [],
+        fetch_project_events_command=lambda _project_id: [],
+    ) == CommandResult(kind="message", message=get_placeholder_message())
 
 
 def test_run_tui_command_lists_tasks_for_project() -> None:
