@@ -9,6 +9,8 @@ from agentbahn.projects.schemas import FeatureResponse
 from django.core.management import call_command
 
 from agentbahn.codebase_agent.schemas import CodebaseAgentStreamEvent
+from agentbahn.llms.schemas import LlmConfigListResponse
+from agentbahn.llms.schemas import LlmConfigResponse
 from agentbahn_tui.project_events import FEATURE_EVENT_ENTITY_TYPE
 from agentbahn_tui.project_events import PROJECT_EVENT_ENTITY_TYPE
 from agentbahn_tui.project_events import TASK_EVENT_ENTITY_TYPE
@@ -25,7 +27,10 @@ from agentbahn_tui.tui import format_event_details
 from agentbahn_tui.tui import format_tasks_output
 from agentbahn_tui.tui import get_placeholder_message
 from agentbahn_tui.tui import load_command_history
+from agentbahn_tui.tui import load_selected_model_config_id
+from agentbahn_tui.tui import load_verified_selected_model_config_id
 from agentbahn_tui.tui import run_tui_command
+from agentbahn_tui.tui import save_selected_model_config_id
 
 
 def test_placeholder_message_is_stable() -> None:
@@ -377,6 +382,58 @@ def test_command_history_file_appends_commands(tmp_path) -> None:
     append_command_history(history_file, " /task list 7 ")
 
     assert history_file.read_text(encoding="utf-8") == "/project list\n/task list 7\n"
+
+
+def test_selected_model_config_file_round_trips_config_id(tmp_path) -> None:
+    model_config_file = tmp_path / "state" / "model_config"
+
+    assert load_selected_model_config_id(model_config_file) is None
+
+    save_selected_model_config_id(model_config_file, 7)
+
+    assert model_config_file.read_text(encoding="utf-8") == "7\n"
+    assert load_selected_model_config_id(model_config_file) == 7
+
+
+def test_selected_model_config_file_ignores_invalid_content(tmp_path) -> None:
+    model_config_file = tmp_path / "model_config"
+    model_config_file.write_text("not-an-id\n", encoding="utf-8")
+
+    assert load_selected_model_config_id(model_config_file) is None
+
+
+def test_selected_model_config_file_verifies_config_exists(tmp_path) -> None:
+    model_config_file = tmp_path / "model_config"
+    save_selected_model_config_id(model_config_file, 7)
+
+    verified_config_id = load_verified_selected_model_config_id(
+        model_config_file,
+        lambda: LlmConfigListResponse(
+            configs=[
+                LlmConfigResponse(
+                    id=7,
+                    name="Groq fast",
+                    provider="groq",
+                    llm_name="llama-3.1-8b-instant",
+                    api_key_configured=True,
+                )
+            ]
+        ),
+    )
+
+    assert verified_config_id == 7
+
+
+def test_selected_model_config_file_drops_missing_config(tmp_path) -> None:
+    model_config_file = tmp_path / "model_config"
+    save_selected_model_config_id(model_config_file, 7)
+
+    verified_config_id = load_verified_selected_model_config_id(
+        model_config_file,
+        lambda: LlmConfigListResponse(configs=[]),
+    )
+
+    assert verified_config_id is None
 
 
 def test_tui_command_history_uses_up_and_down_keys(tmp_path) -> None:

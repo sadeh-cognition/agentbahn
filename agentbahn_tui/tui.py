@@ -183,6 +183,10 @@ def find_command_history_file() -> Path:
     return find_agentbahn_home() / "command_history"
 
 
+def find_model_config_file() -> Path:
+    return find_agentbahn_home() / "model_config"
+
+
 def load_command_history(history_file: Path) -> list[str]:
     try:
         history_contents = history_file.read_text(encoding="utf-8")
@@ -210,6 +214,46 @@ def append_command_history(history_file: Path, command: str) -> None:
             history_handle.write(f"{normalized_command}\n")
     except OSError:
         return
+
+
+def load_selected_model_config_id(model_config_file: Path) -> int | None:
+    try:
+        model_config_contents = model_config_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    normalized_config_id = model_config_contents.strip()
+    if not normalized_config_id:
+        return None
+
+    try:
+        return int(normalized_config_id)
+    except ValueError:
+        return None
+
+
+def save_selected_model_config_id(model_config_file: Path, config_id: int) -> None:
+    try:
+        model_config_file.parent.mkdir(parents=True, exist_ok=True)
+        model_config_file.write_text(f"{config_id}\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def load_verified_selected_model_config_id(
+    model_config_file: Path,
+    fetch_llm_configs_command: Callable[[], LlmConfigListResponse],
+) -> int | None:
+    config_id = load_selected_model_config_id(model_config_file)
+    if config_id is None:
+        return None
+
+    configs = fetch_llm_configs_command().configs
+    if any(config.id == config_id for config in configs):
+        return config_id
+    return None
 
 
 @dataclass
@@ -470,6 +514,11 @@ class AgentbahnTui(App[None]):
         self._save_llm_config_command = save_llm_config_command
         self._stream_agent_command = stream_agent_command
         self._history_file = history_file or find_command_history_file()
+        self._model_config_file = (
+            self._history_file.parent / find_model_config_file().name
+            if history_file is not None
+            else find_model_config_file()
+        )
         self._command_history = CommandHistory(
             commands=load_command_history(self._history_file)
         )
@@ -478,7 +527,10 @@ class AgentbahnTui(App[None]):
         self._llm_configs: list[LlmConfigResponse] = []
         self._selected_llm_config_id: int | None = None
         self._suppress_llm_select_change = False
-        self._selected_model_config_id: int | None = None
+        self._selected_model_config_id = load_verified_selected_model_config_id(
+            self._model_config_file,
+            self._fetch_llm_configs_command,
+        )
 
     def _set_llm_form_controls_disabled(self, disabled: bool) -> None:
         self.query_one("#llm-config-select", Select).disabled = disabled
@@ -798,6 +850,7 @@ class AgentbahnTui(App[None]):
             return
 
         self._selected_model_config_id = selected_config.id
+        save_selected_model_config_id(self._model_config_file, selected_config.id)
         self._refresh_model_config_table(selected_config.id)
         status.update(_format_model_selection(selected_config))
 

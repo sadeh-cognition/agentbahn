@@ -556,3 +556,111 @@ def test_tui_model_command_selects_config_for_agent_chat(tmp_path) -> None:
         assert captured_requests == [("Build", 2)]
 
     asyncio.run(run_test())
+
+
+def test_tui_model_selection_persists_across_sessions(tmp_path) -> None:
+    configs = [
+        LlmConfigResponse(
+            id=1,
+            name="Groq fast",
+            provider="groq",
+            llm_name="llama-3.1-8b-instant",
+            api_key_configured=True,
+        ),
+        LlmConfigResponse(
+            id=2,
+            name="OpenAI main",
+            provider="openai",
+            llm_name="gpt-5.5",
+            api_key_configured=True,
+        ),
+    ]
+    history_file = tmp_path / "command_history"
+
+    async def first_session() -> None:
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            fetch_llm_configs_command=lambda: LlmConfigListResponse(configs=configs),
+            history_file=history_file,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("/", "m", "o", "d", "e", "l")
+            await pilot.press("enter")
+            app.query_one("#model-config-select").value = "2"
+            await pilot.click("#model-use-button")
+
+    async def second_session() -> None:
+        captured_requests: list[tuple[str, int | None]] = []
+
+        def stream_agent_command(query: str, llm_config_id: int | None):
+            captured_requests.append((query, llm_config_id))
+            yield CodebaseAgentStreamEvent(type="result", content="Done")
+
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            fetch_llm_configs_command=lambda: LlmConfigListResponse(configs=configs),
+            stream_agent_command=stream_agent_command,
+            history_file=history_file,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("B", "u", "i", "l", "d")
+            await pilot.press("enter")
+            await pilot.pause()
+
+        assert captured_requests == [("Build", 2)]
+
+    asyncio.run(first_session())
+    assert (tmp_path / "model_config").read_text(encoding="utf-8") == "2\n"
+    asyncio.run(second_session())
+
+
+def test_tui_ignores_persisted_model_selection_when_config_is_missing(tmp_path) -> None:
+    async def run_test() -> None:
+        captured_requests: list[tuple[str, int | None]] = []
+        fetch_count = 0
+        model_config_file = tmp_path / "model_config"
+        model_config_file.write_text("99\n", encoding="utf-8")
+
+        def fetch_llm_configs_command() -> LlmConfigListResponse:
+            nonlocal fetch_count
+            fetch_count += 1
+            return LlmConfigListResponse(
+                configs=[
+                    LlmConfigResponse(
+                        id=1,
+                        name="Groq fast",
+                        provider="groq",
+                        llm_name="llama-3.1-8b-instant",
+                        api_key_configured=True,
+                    )
+                ]
+            )
+
+        def stream_agent_command(query: str, llm_config_id: int | None):
+            captured_requests.append((query, llm_config_id))
+            yield CodebaseAgentStreamEvent(type="result", content="Done")
+
+        app = AgentbahnTui(
+            fetch_projects_command=lambda: [],
+            fetch_tasks_command=lambda _project_id: [],
+            fetch_project_events_command=lambda _project_id: [],
+            fetch_llm_configs_command=fetch_llm_configs_command,
+            stream_agent_command=stream_agent_command,
+            history_file=tmp_path / "command_history",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("B", "u", "i", "l", "d")
+            await pilot.press("enter")
+            await pilot.pause()
+
+        assert fetch_count == 1
+        assert captured_requests == [("Build", None)]
+
+    asyncio.run(run_test())
