@@ -7,7 +7,7 @@ import dspy
 from dspy.utils.callback import BaseCallback
 
 from agentbahn.llms.models import decrypt_api_key
-from agentbahn.llms.openai_lm import OpenAIFlexLM
+from agentbahn.llms.openai_lm import LM
 from agentbahn.llms.services import get_llm_configuration
 
 
@@ -76,16 +76,16 @@ def get_weather(city: str) -> str:
     return f"The weather in {city} is sunny and 72 degrees."
 
 
-def build_openai_flex_lm() -> OpenAIFlexLM:
+def build_openai_flex_lm() -> LM:
     config = get_llm_configuration()
     if config is None:
         raise click.ClickException("No LLM configuration found.")
     if config.provider.strip().lower() != "openai":
         raise click.ClickException(
-            "The configured LLM provider must be 'openai' to use OpenAIFlexLM."
+            "The configured LLM provider must be 'openai' to use LM."
         )
 
-    return OpenAIFlexLM(
+    return LM(
         model=config.llm_name,
         api_key=decrypt_api_key(config.encrypted_api_key),
     )

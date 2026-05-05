@@ -10,7 +10,7 @@ from openai import OpenAI
 DEFAULT_FLEX_TIMEOUT_SECONDS = 900.0
 
 
-class OpenAIFlexLM(dspy.BaseLM):
+class LM(dspy.BaseLM):
     """DSPy LM backed by the official OpenAI SDK with Flex processing enabled."""
 
     def __init__(
@@ -70,6 +70,12 @@ class OpenAIFlexLM(dspy.BaseLM):
         }
         if "max_tokens" in request_kwargs:
             request_kwargs["max_output_tokens"] = request_kwargs.pop("max_tokens")
+        if "response_format" in request_kwargs:
+            text = request_kwargs.get("text") or {}
+            request_kwargs["text"] = {
+                **text,
+                "format": request_kwargs.pop("response_format"),
+            }
         if request_kwargs.get("rollout_id") is None:
             request_kwargs.pop("rollout_id", None)
         return request_kwargs
